@@ -1,0 +1,107 @@
+%%START_PERL%%
+my $VERSION = '$Id: cv-insert.pl.in,v 1.5.2.1 2001/01/15 18:52:04 jes Exp $ ';
+
+use strict;
+use blib;
+use Carp;
+use Getopt::Long;
+use File::Basename;
+%%GENEX_EXTRALIBS%%
+
+use XML::DOM;
+
+use Genex qw($SU_USERNAME $SU_PASSWORD);
+use Bio::Genex::DBUtils qw(create_insert_sql);
+use Bio::Genex::XMLUtils qw(assert_element);
+use Bio::Genex::ExternalDatabase;
+
+use vars qw(%OPTIONS);
+
+$OPTIONS{ro} = '%%GENEX_RO_USER%%';
+$OPTIONS{su} = '%%GENEX_SU_USER%%';
+my $rc = GetOptions(\%OPTIONS, 'ro=s', 'su=s');
+
+my $USAGE = <<"EOU";
+usage: $0 [-ro=readonly_user] [-su=super_user] file1 file2 ...
+EOU
+
+die "Bad option: $rc\n$USAGE" unless $rc;
+
+my @files;
+die "No files specified\n$USAGE\n" unless scalar @ARGV;
+
+# open up a writeable connection
+$Bio::Genex::DBNAME = 'genex';
+$Bio::Genex::USER = $SU_USERNAME;
+$Bio::Genex::PASSWORD = $SU_PASSWORD;
+$Bio::Genex::TRANSACTION = 0;	# transactions don't matter with DROP
+
+my $dbh = Bio::Genex::current_connection();
+foreach my $infile (@ARGV) {
+  my $PARSER = XML::DOM::Parser->new();
+  my $DOC = $PARSER->parsefile($infile);
+  my ($cv_node) = $DOC->getElementsByTagName('controlled_vocabulary');
+  error ($dbh,"Couldn't find controlled_vocabular element") 
+    unless defined $cv_node;
+
+  my $curr_table = $cv_node->getAttribute('cv_table');
+  error ($dbh,"cv_table attribute not defined for file: $infile")
+    unless $curr_table ne '';
+
+  print STDERR "Handling $curr_table\n";
+  print STDERR "  Dropping\n";
+  $dbh->do("DROP TABLE $curr_table");
+  error($dbh,"Couldn't drop table $curr_table: $DBI::errstr")
+    if $dbh->err;
+
+  print STDERR "  Creating\n";
+  $dbh->do("CREATE TABLE $curr_table (term_string varchar(48), description text)");
+  die "Couldn't create table $curr_table: $DBI::errstr" if $dbh->err;
+
+  # set the readonly user priveleges
+  my $user = $OPTIONS{ro};
+  my $priveleges = 'SELECT';
+  print STDERR "  Granting $priveleges to $user\n";
+  $dbh->do("GRANT $priveleges on $curr_table TO $user");
+  error($dbh,"Couldn't grant $priveleges to $user, $curr_table: $DBI::errstr")
+    if $dbh->err;
+
+  # set the super user priveleges
+  $user = $OPTIONS{su};
+  my $priveleges = 'ALL';
+  print STDERR "  Granting $priveleges to $user\n";
+  $dbh->do("GRANT $priveleges on $curr_table TO $user");
+  error($dbh,"Couldn't grant $priveleges to $user, $curr_table: $DBI::errstr")
+    if $dbh->err;
+
+  my @term_list = $DOC->getElementsByTagName('term');
+  die "no terms found"  unless scalar @term_list;
+
+  my $sql = create_insert_sql($dbh,$curr_table,['term_string',
+						'description']);
+  my $sth = $dbh->prepare($sql) || die $DBI::errstr;
+
+  foreach my $term_node (@term_list) {
+    assert_element($term_node,'term');
+    my $name = $term_node->getAttribute('name');
+    error($dbh,"Couldn't get name attribute from" . $term_node->toString(),
+	  $sth) unless $name ne '';
+    my $description = $term_node->getAttribute('description');
+    warn("No description for " . $term_node->toString() . "\n")
+      unless $description ne '';
+
+    $sth->execute($name,$description);
+    error($dbh,"SQL=<$sql>, DBI=<$DBI::errstr>",$sth) if $sth->err;
+  }
+  $sth->finish();
+}
+
+$dbh->disconnect();
+exit(0);
+
+sub error {
+  my ($dbh,$msg,$sth) = @_;
+  $dbh->disconnect();
+  $sth->finish() if defined $sth;
+  die $msg;
+}

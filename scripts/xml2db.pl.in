@@ -1,0 +1,1426 @@
+%%START_PERL%%
+
+#------------------------------------------------------------------------
+# GEMLParser.pl July 10, 2000 JZ
+#
+# Copyright 2000. NCGR. All rights reserved.
+#
+# Reads in a well-formatted GEML document and
+# writes it to the database.
+#
+# USAGE:
+#
+#	GEMLParser.pl [options] [filename]
+#
+# OPTIONS:
+#       -S server       rdbms name e.g Postgres Cybase Oracle 
+#                       (option currently not active)
+#	-D database	A database name
+#	-U user		A user's name
+#	-P password	The user's password
+#       -f filename     The geml file name
+#	-h		Print a help message
+#
+#------------------------------------------------------------------------
+use strict;
+use Getopt::Std;
+use POSIX 'strftime';
+use Carp;
+use File::Basename;
+
+%%GENEX_EXTRALIBS%%
+use blib;
+
+use Bio::Genex;
+use Bio::Genex::DBUtils qw(fetch_last_id create_select_sql create_insert_sql);
+use XML::Parser;
+use XML::DOM;
+use DBI;
+use subs qw(pgInsert parseContact parseCitation parseScanner parseSoftware);
+use subs qw(parseExternalDatabase parseSpecies parseProtocol parseSample);
+use subs qw(parseSequenceFeature parseArrayLayout parseExperimentSet);
+use subs qw(pgInsertAMG Usage);
+
+my $rdbms;
+my $database;
+my $host;
+my $port;
+#Default user info
+my $user;
+my $password;
+
+# CVS version
+my $version = q[$Id: xml2db.pl.in,v 1.3.2.1 2001/01/15 18:52:05 jes Exp $ ];
+
+#Parse the command line
+my %opts = ();
+getopts('hf:S:D:U:P:', \%opts);
+if(defined($opts{S})) { $Bio::Genex::DBMS = $opts{S}; }
+if(defined($opts{D})) { $Bio::Genex::DBNAME = $opts{D}; }
+if(defined($opts{U})) { $Bio::Genex::USER = $opts{U}; }
+if(defined($opts{P})) { $Bio::Genex::PASSWORD = $opts{P}; }
+if(defined($opts{f})) { $opts{f}; }
+if(defined($opts{h})) { Usage(); }
+
+#print help menu if no argument given
+Usage() unless defined($opts{f});
+
+my ($file,$dir) = fileparse($opts{f});
+unless (-d $dir) {
+  die "$0: directory $dir does not exist\n";
+}
+
+# we change to the directory containing the XML files
+print STDERR "Using directory: $dir\n";
+chdir($dir);
+
+#Even this was checked earlier, just to be safe...
+die  "No GEML input file specified.\n" unless defined($file);
+#Parsing in the geml file.
+print "Reading GEML file...";
+my $parser = new XML::DOM::Parser;
+my $doc = $parser->parsefile($file);
+print "DONE.\n";
+my $geml = $doc->getDocumentElement;
+
+#a hash table for id references. When an element is inserted into the the
+#database, a primary key is generated, there must be a way of finding this
+#key by the XML ids in this document. The hash table's keys would be the id
+#for the XML element and values would be the keys returned.
+#values are stored as tableName[space]pk
+my %idTable = ();
+my %linkTable = ();  #currently used only for UserSec
+my %usfTable = ();
+my %usfAlsTable = (); #this will be used for spotlink table, use usf_fk find als_fk
+                      #keys will be xmlid for sequencefeature values will be db als_fk
+my %alsTable = ();  #this will store als id as key and als_pk as value
+
+my %exfileTable = (); #keeps track of external files
+
+#this index is kept to keep the order of elements parsed since hash tables
+#don't return keys in the order they are inserted.
+my @gemlIndex = (
+   'contact', 
+   'group',                
+   'citation',
+   'scanner',
+   'software',
+   'external_database',
+   'species', 
+   'protocol',
+   'sample',
+   'usf_list',
+   'array_layout',
+   'experiment_set',
+);
+my %tables = (
+   contact               => \&parseContact,
+   group                 => \&parseGroup,
+   citation              => \&parseCitation,
+   scanner               => \&parseScanner,
+   software              => \&parseSoftware,
+   external_database     => \&parseExternalDatabase,
+   species               => \&parseSpecies,
+   protocol              => \&parseProtocol,
+   sample                => \&parseSample,
+   usf_list              => \&parseUserSequenceFeature,
+#   csf_list              => \&parseCanonicalSequenceFeature,
+   array_layout          => \&parseArrayLayout,
+   experiment_set        => \&parseExperimentSet,
+);
+
+my %indexTables = (
+   AL_Spots              => 'al_spots_als_pk_seq',
+   AM_FactorValues       => ' ',
+   AM_Group              => 'am_group_amg_pk_seq',
+   AM_Spots              => 'am_spots_ams_pk_seq',
+   AM_SuspectSpots       => 'am_suspectspots_ams_fk_key',
+   ArrayLayout           => 'arraylayout_al_pk_seq',
+   ArrayMeasurement      => 'arraymeasurement_am_pk_seq',
+   BlastHits             => 'blasthits_bh_pk_seq',
+   CanonicalSequenceFeature => 'canonicalsequencefea_csf_pk_seq',
+   Chromosome            => 'chromosome_chr_pk_seq',
+   Citation              => 'citation_cit_pk_seq',
+   Contact               => 'contact_con_pk_seq',
+   CSF_ExternalDBLink    => ' ',
+   ExperimentFactors     => 'experimentfactors_ef_pk_seq',
+   ExperimentSet         => 'experimentset_es_pk_seq ',
+   ExternalDatabase      => ' ',
+   GroupLink             => ' ',
+   GroupSec              => 'groupsec_gs_pk_seq',
+   HotSpots              => ' ',     
+   Protocol              => 'protocol_prt_pk_seq',           
+   RelatedCSF            => ' ',
+   Sample                => 'sample_smp_pk_seq',
+   SampleProtocols       => ' ',
+   Scanner               => 'scanner_scn_pk_seq',
+   Software              => 'software_sw_pk_seq',
+   Species               => 'species_spc_pk_seq',
+   SpotLink              => ' ',
+   TL_FactorValues       => ' ',
+   TreatmentLevel        => 'treatmentlevel_tl_pk_seq',
+   UserCanonicalLink     => ' ',
+   UserSec               => 'usersec_us_pk_seq',
+   UserSequenceFeature   => 'usersequencefeature_usf_pk_seq',
+   USF_ExternalDBLink    => ' ',
+);
+
+#this table is used to defined the fields to search in for each table
+#used when searching for existing information
+my %lookupKeys = (
+   ArrayLayout           => 'name',
+   BlastHits             => 'usf_fk',
+   CanonicalSequenceFeature => 'csf_name',
+   Chromosome            => 'name',  #????
+   Citation              => 'title',
+   Contact               => 'contact_person',
+   CSF_ExternalDBLink    => 'csf_fk',
+   ExternalDatabase      => 'name',
+   GroupLink             => 'us_fk', #need some more thoughts
+   GroupSec              => 'group_name',     
+   Protocol              => 'title',           
+   #Scanner               => 'model_name',
+   Software              => 'name',
+   Species               => 'primary_scientific_name',
+   UserCanonicalLink     => 'usf_fk', #need both eventually
+   UserSec               => 'con_fk',
+   UserSequenceFeature   => 'usf_name',
+   USF_ExternalDBLink    => 'usf_fk',
+);
+
+#this table is used to specify the fields in each table that holds the pk
+#used when searching for existing info
+my %pkIndex = (
+   ArrayLayout           => 'al_pk',
+   BlastHits             => 'bh_pk',
+   CanonicalSequenceFeature => 'csf_pk',
+   Chromosome            => 'chr_pk',
+   Citation              => 'cit_pk',
+   Contact               => 'con_pk',
+   CSF_ExternalDBLink    => 'db_name', #hmmm
+   ExternalDatabase      => '*',
+   GroupLink             => '*',
+   GroupSec              => 'gs_pk',     
+   Protocol              => 'prt_pk',           
+   Scanner               => 'scn_pk',
+   Software              => 'sw_pk',
+   Species               => 'spc_pk',
+   UserCanonicalLink     => '*',
+   UserSec               => 'us_pk',
+   UserSequenceFeature   => 'usf_pk',
+   USF_ExternalDBLink    => '*',
+);
+
+
+#preparing database connectivity
+$Bio::Genex::TRANSACTION = 1;
+my $dbh = Bio::Genex::current_connection();
+
+getExternalFileRefs();
+
+foreach my $key (@gemlIndex) {
+  print "parsing $key...\n";
+  my $nodeList = $geml->getElementsByTagName("$key");
+  my $n = $nodeList->getLength;
+  #die "ERROR: no $key element found in GEML.\n" unless $n>0;
+  print "ERROR: no $key element found in GEML.\n" unless $n>0;
+  my $i;
+  for ($i=0; $i<$n; $i++) {
+    my $node = $nodeList->item($i);
+    &{$tables{$key}}($node);
+    print $i+1, " ";
+  }
+  print "...DONE\n";
+}
+
+$dbh->commit();
+#avoid memory leaks and cleanup circular reference for garbage collection
+$doc->dispose;
+$dbh->disconnect();
+
+####################################################
+#FOLLOWING SUBROUTINES WILL HANDLE GEML STRUCTURES#
+####################################################
+
+#the following parse-subroutines are activated through a hash table.
+
+sub parseContact {
+  my $tableName = 'Contact';
+  my $structure = $_[0];
+  #content will hold the values to be inserted, keys will be column names
+  my %content= ();
+  $content{type} = $structure->getAttribute("type");
+  my $timeformat = '%r %A %B %d %Y'; 
+  $content{last_updated} = strftime($timeformat, localtime);
+
+  my $tags = $structure->getChildNodes;
+  my $count = $tags->getLength;
+  my $j;
+  for ($j=0; $j<$count; $j++) {
+    my $current = $tags->item($j);
+    next unless $current->getNodeType == 1; #1 is element type, 3 (text) parsed but ignored.
+    if ($current->getChildNodes->getLength > 0) { #this ignores elements w/o a value
+      $content{$current->getNodeName} = $current->getFirstChild->getNodeValue;
+    } 
+  }
+  my $localId = $structure->getAttribute("id");
+
+  #inserting the contact information
+  $idTable{$localId} = $tableName." ".pgInsert($tableName, \%content);
+
+  #if type is data provider, insert into UserSec table
+  if ($content{type} eq 'data provider') {
+    my @temp = split / /, $idTable{$localId};
+    my %userSec = (
+       con_fk => $temp[1],
+       login => join('', split / /, $content{contact_person}),
+       password => join('', split / /, $content{contact_person}),
+    );
+    $linkTable{$localId} = 'UserSec '.pgInsert('UserSec', \%userSec);
+
+  }
+}
+
+sub parseGroup {
+  my $tableName = 'GroupSec';
+  my $structure = $_[0];
+  #I should build a hash out of the attributes and elements then pass it
+  #to the pgInsert subroutine.
+  my %content= ();
+  my $localId = $structure->getAttribute("id");
+  $content{group_name} = $structure->getAttribute("name");
+  $idTable{$localId} = $tableName." ".pgInsert($tableName, \%content);
+ 
+  #this is the grouplink table inserting routine.
+  my $tags = $structure->getChildNodes;
+  my $count = $tags->getLength;
+  my $j;
+  for ($j=0; $j<$count; $j++) {
+    my $current = $tags->item($j);
+    next unless $current->getNodeType == 1; #1 is a element type, 3 parsed but ignored.
+    if ($current->getAttributes->getLength > 0) { #con_id stored as attributes
+      my @temp = split / /, $linkTable{$current->getAttribute("contact_id")}; 
+      my @tempGs = split / /, $idTable{$localId};
+      my %groupLink = (
+	 us_fk => $temp[1],
+	 gs_fk => $tempGs[1],
+      );
+      pgInsert('GroupLink', \%groupLink); #nothing returned here.
+    } 
+
+  }
+
+}
+
+
+sub parseCitation {
+  my $tableName = 'Citation';
+  my $structure = $_[0];
+  my %content = ();
+  my $localId = $structure->getAttribute("id");
+  #since citations are empty tags, we only need to loop over attributes
+  my $Attribs = $structure->getAttributes;
+  my $count = $Attribs->getLength;
+  #since citation is optional, we may not have anything for it.
+  if ($count > 0) {
+    my $j;
+    for ($j=0; $j<$count; $j++) {
+      my $current = $Attribs->item($j);
+      next unless $current->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+      $content{$current->getName} = $current->getValue;
+    }
+    #since id is parsed in, need to get rid of it.
+    if (exists($content{id})) {
+      delete($content{id});
+    }
+  }
+
+  $idTable{$localId} = $tableName." ".pgInsert($tableName, \%content);
+}
+
+sub parseScanner {
+  my $tableName = 'Scanner';
+  my $structure = $_[0];
+  my %content = ();
+  my $localId = $structure->getAttribute("id");
+  #since scanners are empty tags, we only need to loop over attributes
+  my $Attribs = $structure->getAttributes;
+  my $count = $Attribs->getLength;
+  #since scanner is optional, we may not have anything for it.
+  if ($count > 0) {
+    my $j;
+    for ($j=0; $j<$count; $j++) {
+      my $current = $Attribs->item($j);
+      next unless $current->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+      #if the attribute is id to contact, need to get the key from db out of idTable
+      if ($current->getName ne 'contact_id') {
+	$content{$current->getName} = $current->getValue;
+      } else {
+	my @tempId = split / /, $idTable{$current->getValue};
+	$content{con_fk} = $tempId[1];
+      }
+      
+    }
+    #since id is parsed in, need to get rid of it.
+    if (exists($content{id})) {
+      delete($content{id});
+    }
+  }
+
+  $idTable{$localId} = $tableName." ".pgInsert($tableName, \%content);
+}
+
+sub parseSoftware {
+  my $tableName = 'Software';
+  my $structure = $_[0];
+  my %content = ();
+  my $localId = $structure->getAttribute("id");
+  #since scanners are empty tags, we only need to loop over attributes
+  my $Attribs = $structure->getAttributes;
+  my $count = $Attribs->getLength;
+  #since scanner is optional, we may not have anything for it.
+  if ($count > 0) {
+    my $j;
+    for ($j=0; $j<$count; $j++) {
+      my $current = $Attribs->item($j);
+      next unless $current->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+      #if the attribute is id to contact, need to get the key from db out of idTable
+      if ($current->getName ne 'contact_id') {
+	$content{$current->getName} = $current->getValue;
+      } else {
+	my @tempId = split / /, $idTable{$current->getValue};
+	$content{con_fk} = $tempId[1];
+      }
+      
+    }
+    #since id is parsed in, need to get rid of it.
+    if (exists($content{id})) {
+      delete($content{id});
+    }
+  }
+
+  $idTable{$localId} = $tableName." ".pgInsert($tableName, \%content);
+}
+
+sub parseExternalDatabase {
+  my $tableName = 'ExternalDatabase';
+  my $structure = $_[0];
+  my %content = ();
+  my $localId = $structure->getAttribute("id");
+  #since database are empty tags, we only need to loop over attributes
+  my $Attribs = $structure->getAttributes;
+  my $count = $Attribs->getLength;
+  #since citation is optional, we may not have anything for it.
+  if ($count > 0) {
+    my $j;
+    for ($j=0; $j<$count; $j++) {
+      my $current = $Attribs->item($j);
+      next unless $current->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+      $content{$current->getName} = $current->getValue;
+    }
+    #since id is parsed in, need to get rid of it.
+    if (exists($content{id})) {
+      delete($content{id});
+    }
+  }
+  pgInsert($tableName, \%content);
+  $idTable{$localId} = $tableName." ".$content{name};
+}
+
+
+sub parseSpecies {
+  my $tableName = 'Species';
+  my $structure = $_[0];
+  #content will hold the values to be inserted, keys will be column names
+  my %content= ();
+  my $localId = $structure->getAttribute("id");
+  #loop over attributes
+  my $Attribs = $structure->getAttributes;
+  my $count = $Attribs->getLength;
+  #since species is optional, we may not have anything for it.
+  if ($count > 0) {
+    my $j;
+    for ($j=0; $j<$count; $j++) {
+      my $current = $Attribs->item($j);
+      next unless $current->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+      $content{$current->getName} = $current->getValue;
+    }
+    #since id is parsed in, need to get rid of it.
+    if (exists($content{id})) {
+      delete($content{id});
+    }
+  }
+  #now go through the elements except for Chromosome_list
+  my $tags = $structure->getChildNodes;
+  $count = $tags->getLength;
+  my $speciesInserted = 0;
+  my $j;
+  for ($j=0; $j<$count; $j++) {
+    my $current = $tags->item($j);
+    next unless $current->getNodeType == 1; #1 is element type, 3 (text) parsed but ignored.
+    if ($current->getNodeName ne 'chromosome_list') {
+      if ($current->getChildNodes->getLength > 0) { #this ignores elements w/o a value
+	$content{$current->getNodeName} = $current->getFirstChild->getNodeValue;
+      } 
+    } else {
+      #first insert spiecies information
+      my $tempId = pgInsert($tableName, \%content);
+      $idTable{$localId} = $tableName." ".$tempId;
+      $speciesInserted = 1;
+      #now go through the chromosomes
+      $tableName='Chromosome';
+      
+      my $chromosomes = $current->getChildNodes;
+      my $chrCount = $chromosomes->getLength;
+      my $k;
+      for ($k=0; $k<$chrCount; $k++) {
+	my $chromosome = $chromosomes->item($k);
+	next unless $chromosome->getNodeType == 1;
+	my %chrContent = (
+	   spc_fk   => $tempId,
+	   name     => $chromosome->getAttribute("name"),
+	   'length' => $chromosome->getAttribute("length"),
+        );
+	pgInsert($tableName, \%chrContent);
+      }
+    }
+  }
+  if ($speciesInserted == 0) {
+      my $tempId = pgInsert($tableName, \%content);
+      $idTable{$localId} = $tableName." ".$tempId;
+  }
+}
+
+sub parseProtocol {
+  my $tableName = 'Protocol';
+  my $structure = $_[0];
+  #content will hold the values to be inserted, keys will be column names
+  my %content= ();
+  my $localId = $structure->getAttribute("id");
+  #loop over attributes
+  my $Attribs = $structure->getAttributes;
+  my $count = $Attribs->getLength;
+  #since species is optional, we may not have anything for it.
+  if ($count > 0) {
+    my $j;
+    for ($j=0; $j<$count; $j++) {
+      my $current = $Attribs->item($j);
+      next unless $current->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+      $content{$current->getName} = $current->getValue;
+    }
+    #since id is parsed in, need to get rid of it.
+    if (exists($content{id})) {
+      delete($content{id});
+    }
+  }
+
+  my $tags = $structure->getChildNodes;
+  $count = $tags->getLength;
+  my $j;
+  for ($j=0; $j<$count; $j++) {
+    my $current = $tags->item($j);
+    next unless $current->getNodeType == 1; #1 is element type, 3 (text) parsed but ignored.
+    if ($current->getChildNodes->getLength > 0) { #this ignores elements w/o a value
+      $content{$current->getNodeName} = $current->getFirstChild->getNodeValue;
+    } 
+  }
+  #inserting the protocol information
+  $idTable{$localId} = $tableName." ".pgInsert($tableName, \%content);
+}
+
+
+sub  parseSample {
+  my $tableName = 'Sample';
+  my $structure = $_[0];
+  #content will hold the values to be inserted, keys will be column names
+  my %content= ();
+  my $localId = $structure->getAttribute("id");
+  #the other attribute is species id
+  my @tempId = split / /, $idTable{$structure->getAttribute("species_id")};
+  $content{spc_fk} = $tempId[1];
+  @tempId = split / /, $idTable{$structure->getAttribute("contact_id")};
+  $content{con_fk} = $tempId[1];
+
+  #now go through the elements except for Chromosome_list
+  my $tags = $structure->getChildNodes;
+  my $count = $tags->getLength;
+  my $j;
+  for ($j=0; $j<$count; $j++) {
+    my $current = $tags->item($j);
+    next unless $current->getNodeType == 1; #1 is element type, 3 (text) parsed but ignored.
+    #first get the qualifiers
+    if ($current->getNodeName ne 'sample_protocol_list') {
+      my $qualifiers = $current->getChildNodes;
+      my $quaCount = $qualifiers->getLength;
+      my $k;
+      for ($k=0; $k<$quaCount; $k++) {
+	my $qualifier = $qualifiers->item($k);
+	next unless $qualifier->getNodeType == 1;
+	my $tempName = $qualifier->getAttribute("name");
+	my $tempValue = $qualifier->getAttribute("value");
+	$content{$tempName} = $tempValue;
+      } 
+    } else {
+      #first insert sample information
+      my $tempId = pgInsert($tableName, \%content);
+      $idTable{$localId} = $tableName." ".$tempId;
+      #now go through the protocols for SampleProtocols linking table
+      $tableName='SampleProtocols';
+      
+      my $samProts = $current->getChildNodes;
+      my $spCount = $samProts->getLength;
+      my $k;
+      for ($k=0; $k<$spCount; $k++) {
+	my $samProt = $samProts->item($k);
+	next unless $samProt->getNodeType == 1;
+	my @tempPrtId = split / /, $idTable{$samProt->getAttribute("protocol_id")};
+	my %spContent = (
+	   smp_fk => $tempId,
+	   prt_fk => $tempPrtId[1],
+        );
+	pgInsert($tableName, \%spContent);
+      }
+    }
+  }
+}
+
+#currently this subroutine does not support BlastHits
+#with what we have currently, orfs are identified, certains things need to change
+#when we see new data.
+#keys will be stored in usfTable
+#usf_list is parsed in.
+sub parseUserSequenceFeature {
+  my $csfTableName = 'CanonicalSequenceFeature';
+  my $usfTableName = 'UserSequenceFeature';
+  my $structure = $_[0]; #structure is now usf_list
+  #new stuff
+  my $seqfTags = $structure->getElementsByTagName("data");
+
+  my $sflength = $seqfTags->getLength;
+  warn "Warning, more than one data file for usf found, only use first one.\n" 
+    if $sflength >1;
+
+  my $seqfData = $seqfTags->item(0);
+  my $filekey = $seqfData->getAttribute("external_file_id");
+
+  #parse in the datafile, same parser is used
+  print "Reading SequenceFeature file $exfileTable{$filekey} ... ";
+  my $datadoc = $parser->parsefile($exfileTable{$filekey});
+  print "DONE.\n";
+ 
+  my $sequencefeaturelist = $datadoc->getDocumentElement;
+  my $sequencefeatures = $sequencefeaturelist->getElementsByTagName("sequence_feature");
+
+  my $sfcount = $sequencefeatures->getLength;
+  my $sfindex;
+  for ($sfindex=0; $sfindex<$sfcount; $sfindex++) {
+    #looping over all the sequencefeatures;
+    my $currentsf = $sequencefeatures->item($sfindex);
+    #end of changes
+
+    #content will hold the values to be inserted, keys will be column names
+    my %usfContent= ();
+    #below, all $structures have been changed to $currentsf
+    my $localId = $currentsf->getAttribute("id");
+    #loop over attributes
+    my $Attribs = $currentsf->getAttributes;
+    my $count = $Attribs->getLength;
+    if ($count > 0) {
+      my $j;
+      for ($j=0; $j<$count; $j++) {
+	my $current = $Attribs->item($j);
+	next unless $current->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+	my $tempName = $current->getName;
+	my $tempValue = $current->getValue;
+	if ($tempName eq 'species_id') {
+	  my @tempId = split / /, $idTable{$tempValue};
+	  $usfContent{spc_fk} = $tempId[1];
+	} elsif ($tempName eq 'sample_id') {
+	  my @tempId = split / /, $idTable{$tempValue};
+	  $usfContent{smp_fk} = $tempId[1];
+	} elsif ($tempName eq 'other_type') {
+	  if ($tempValue eq 'ORF') {
+	    $usfContent{$tempName} = 'serial_orf_name';
+	  } else {
+	    error('parseUserSequenceFeature',
+		  "unknown sequence feature type: $tempValue");
+	  }
+	} elsif ($tempName eq 'contact_id') {
+	  my @tempId = split / /, $idTable{$tempValue};
+	  $usfContent{con_fk} = $tempId[1];
+	  @tempId = split / /, $linkTable{$tempValue};
+	  $usfContent{owner_us_fk} = $tempId[1];
+	} else {
+	  $usfContent{$tempName} = $tempValue;
+	}
+      }
+      #since id is parsed in, need to get rid of it.
+      if (exists($usfContent{id})) {
+	delete($usfContent{id});
+      }
+
+    }
+
+    # for now we look up the CSF directly by usf_name
+    my ($csf_db) = Bio::Genex::CanonicalSequenceFeature->get_objects({column=>'csf_name', value=>"$usfContent{usf_name}"});
+    error('parseUserSequenceFeature',"Couldn't get CSF for USF: $usfContent{usf_name}") unless defined $csf_db;
+
+    #get this into the usfContent
+    my $csfId = $csf_db->csf_pk;
+    $usfContent{putative_csf_fk} = $csfId;
+    $usfContent{nonunique_flag} = 'false';
+
+    #now go through the elements for usfContent
+    my $tags = $currentsf->getChildNodes;
+    $count = $tags->getLength;
+    my $j;
+    my $usfInserted = 0;
+    for ($j=0; $j<$count; $j++) {
+      my $current = $tags->item($j);
+      next unless $current->getNodeType == 1; #1 is element type, 3 (text) parsed but ignored.
+      if ($current->getNodeName ne 'database_accession_nums') {
+	if ($current->getChildNodes->getLength > 0) { #this ignores elements w/o a value
+	  $usfContent{$current->getNodeName} = $current->getFirstChild->getNodeValue;
+	} 
+      } else {
+	#first insert USF information
+	my $usfId = pgInsert($usfTableName, \%usfContent);
+	$usfTable{$localId} = $usfId;
+	$usfInserted = 1;
+	#let's get the usf-csf-linking table in
+	my %uclContent = (
+			  usf_fk => $usfId,
+			  csf_fk => $csfId,
+			 );
+	pgInsert('UserCanonicalLink', \%uclContent);
+	#now go through the accession numbers
+	my $usfDBTableName='USF_ExternalDBLink';
+	my $dbAccNums = $current->getChildNodes;
+	my $accCount = $dbAccNums->getLength;
+	my $k;
+	for ($k=0; $k<$accCount; $k++) {
+	  my $dbAccNum = $dbAccNums->item($k);
+	  next unless $dbAccNum->getNodeType == 1;
+	  my @temp = split / /, $idTable{$dbAccNum->getAttribute("database_id")};
+	  my %usfDBAccContent = (
+				 usf_fk => $usfId,
+				 db_name=> $temp[1],
+				 external_identifier => $dbAccNum->getAttribute("accession_num"),
+				);
+	  pgInsert($usfDBTableName, \%usfDBAccContent);
+	}
+      }
+    }
+
+    if ($usfInserted == 0) {
+      my $usfId = pgInsert($usfTableName, \%usfContent);
+      $usfTable{$localId} = $usfId;
+    }
+
+  } #closing of for loop
+
+  $datadoc->dispose;
+  
+}
+
+sub parseCanonicalSequenceFeature {
+  my $csfTableName = 'CanonicalSequenceFeature';
+  my $usfTableName = 'UserSequenceFeature';
+  my $structure = $_[0]; #structure is now usf_list
+  #new stuff
+  my $seqfTags = $structure->getElementsByTagName("data");
+  my $sflength = $seqfTags->getLength;
+  print "Warning, more than one data file for usf found, only use first one.\n" if $sflength >1;
+  my $seqfData = $seqfTags->item(0);
+  my $filekey = $seqfData->getAttribute("external_file_id");
+  #parse in the datafile, same parser is used
+  print "Reading SequenceFeature file...$exfileTable{$filekey}";
+  my $datadoc = $parser->parsefile($exfileTable{$filekey});
+  print "DONE.\n";
+  my $sequencefeaturelist = $datadoc->getDocumentElement;
+  my $sequencefeatures = $sequencefeaturelist->getElementsByTagName("sequence_feature");
+
+  my $sfcount = $sequencefeatures->getLength;
+  my $sfindex;
+  for ($sfindex=0; $sfindex<$sfcount; $sfindex++) {
+    #looping over all the sequencefeatures;
+    my $currentsf = $sequencefeatures->item($sfindex);
+    #end of changes
+
+    #content will hold the values to be inserted, keys will be column names
+    my %csfContent= ();
+    my %usfContent= ();
+    #below, all $structures have been changed to $currentsf
+    my $localId = $currentsf->getAttribute("id");
+    #loop over attributes
+    my $Attribs = $currentsf->getAttributes;
+    my $count = $Attribs->getLength;
+    if ($count > 0) {
+      my $j;
+      for ($j=0; $j<$count; $j++) {
+	my $current = $Attribs->item($j);
+	next unless $current->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+	my $tempName = $current->getName;
+	my $tempValue = $current->getValue;
+	if ($tempName eq 'serial_orf_name') {
+	  $csfContent{csf_name} = $tempValue;
+	  $csfContent{csf_type} = $tempName;
+	  $usfContent{usf_name} = $tempValue;
+	  $usfContent{usf_type} = $tempName;	
+	} elsif ($tempName eq 'gene_name') {
+	  $usfContent{other_name} = $tempValue;
+	  $usfContent{other_type} = $tempName;
+	} elsif ($tempName eq 'species_id') {
+	  my @tempId = split / /, $idTable{$tempValue};
+	  $csfContent{spc_fk} = $tempId[1];
+	  $usfContent{spc_fk} = $tempId[1];
+	} elsif ($tempName eq 'sample_id') {
+	  my @tempId = split / /, $idTable{$tempValue};
+	  $usfContent{smp_fk} = $tempId[1];
+	} elsif ($tempName eq 'contact_id') {
+	  my @tempId = split / /, $idTable{$tempValue};
+	  $usfContent{con_fk} = $tempId[1];
+	  @tempId = split / /, $linkTable{$tempValue};
+	  $usfContent{owner_us_fk} = $tempId[1];
+	} else {
+	  $usfContent{$tempName} = $tempValue;
+	}
+	
+	$csfContent{chromosome} = $usfContent{chromosome} if (exists($usfContent{chromosome}));
+	$csfContent{short_description} = $usfContent{short_description} if (exists($usfContent{short_description}));
+
+      }
+      #since id is parsed in, need to get rid of it.
+      if (exists($usfContent{id})) {
+	delete($usfContent{id});
+      }
+
+    }
+
+    my $csfId = pgInsert($csfTableName, \%csfContent);
+    #get this into the usfContent
+    $usfContent{putative_csf_fk} = $csfId;
+    $usfContent{nonunique_flag} = 'false';
+
+    #now go through the elements for usfContent
+    my $tags = $currentsf->getChildNodes;
+    $count = $tags->getLength;
+    my $j;
+    my $usfInserted = 0;
+    for ($j=0; $j<$count; $j++) {
+      my $current = $tags->item($j);
+      next unless $current->getNodeType == 1; #1 is element type, 3 (text) parsed but ignored.
+      if ($current->getNodeName ne 'database_accession_nums') {
+	if ($current->getChildNodes->getLength > 0) { #this ignores elements w/o a value
+	  $usfContent{$current->getNodeName} = $current->getFirstChild->getNodeValue;
+	} 
+      } else {
+	#first insert USF information
+	my $usfId = pgInsert($usfTableName, \%usfContent);
+	$usfTable{$localId} = $usfId;
+	$usfInserted = 1;
+	#let's get the usf-csf-linking table in
+	my %uclContent = (
+			  usf_fk => $usfId,
+			  csf_fk => $csfId,
+			 );
+	pgInsert('UserCanonicalLink', \%uclContent);
+	#now go through the accession numbers
+	my $usfDBTableName='USF_ExternalDBLink';
+	my $csfDBTableName='CSF_ExternalDBLink';
+	
+	my $dbAccNums = $current->getChildNodes;
+	my $accCount = $dbAccNums->getLength;
+	my $k;
+	for ($k=0; $k<$accCount; $k++) {
+	  my $dbAccNum = $dbAccNums->item($k);
+	  next unless $dbAccNum->getNodeType == 1;
+	  my @temp = split / /, $idTable{$dbAccNum->getAttribute("database_id")};
+	  
+	  my %csfDBAccContent = (
+				 csf_fk => $csfId,
+				 db_name=> $temp[1],
+				 external_identifier => $dbAccNum->getAttribute("accession_num"),
+				);
+	  pgInsert($csfDBTableName, \%csfDBAccContent);
+	
+	  my %usfDBAccContent = (
+				 usf_fk => $usfId,
+				 db_name=> $temp[1],
+				 external_identifier => $dbAccNum->getAttribute("accession_num"),
+				);
+	  pgInsert($usfDBTableName, \%usfDBAccContent);
+	}
+      }
+    }
+
+    if ($usfInserted == 0) {
+      my $usfId = pgInsert($usfTableName, \%usfContent);
+      $usfTable{$localId} = $usfId;
+    }
+
+  } #closing of for loop
+
+  $datadoc->dispose;
+  
+}
+
+sub parseArrayLayout {
+  my $tableName = 'ArrayLayout';
+  my $structure = $_[0];
+  #content will hold the values to be inserted, keys will be column names
+  my %content= ();
+  my $alId;
+  my $localId = $structure->getAttribute("id");
+  #loop over attributes, this is where all info is for ArrayLayout
+  my $Attribs = $structure->getAttributes;
+  my $count = $Attribs->getLength;
+
+  if ($count > 0) {
+    my $j;
+    for ($j=0; $j<$count; $j++) {
+      my $current = $Attribs->item($j);
+      next unless $current->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+      if ($current->getName eq 'contact_id') {
+	my @tempId = split / /, $idTable{$current->getValue};
+	$content{con_fk} = $tempId[1];
+      } else {
+	$content{$current->getName} = $current->getValue;
+      }
+    }
+    #since id is parsed in, need to get rid of it.
+    if (exists($content{id})) {
+      delete($content{id});
+    }
+    $alId = pgInsert($tableName, \%content);
+    $idTable{$localId} = $tableName." ".$alId;
+  }
+
+  #change to use external spot files.
+  my $alsDataList = $structure->getElementsByTagName("data");
+  my $alsDataCount = $alsDataList->getLength;
+  print "Warning: more than one als data files found, use first one only.\n" 
+    if $alsDataCount >1;
+  error('parseArrayLayout','no als data file found!') 
+    if $alsDataCount == 0;
+  my $alsData = $alsDataList->item(0);
+  my $filekey = $alsData->getAttribute("external_file_id");
+  #parse in the datafile, same parser is used
+  print "Reading ALSPot file...$exfileTable{$filekey}";
+  my $datadoc = $parser->parsefile($exfileTable{$filekey});
+  print "DONE.\n";
+  my $gemlspot = $datadoc->getDocumentElement;
+  #now we can loop through all elements under gemlspot
+
+  #now go through the elements for al_spots
+  #$structure changed to $gemlspot
+  my $tags = $gemlspot->getChildNodes;
+  $count = $tags->getLength;
+  my $j;
+  for ($j=0; $j<$count; $j++) {
+    my $current = $tags->item($j);
+    next unless $current->getNodeType == 1; #1 is element type, 3 (text) parsed but ignored.
+    #all elements are arraylayout_spot. for each one, loop through the attributes
+    my %alSpotContent=(
+       al_fk  =>  $alId,
+    );
+    $Attribs = $current->getAttributes;
+    my $attCount = $Attribs->getLength;
+    my $localId = $current->getAttribute("id");
+    my $tempFeature;
+    if ($attCount > 0) {
+      my $k;
+      for ($k=0; $k<$attCount; $k++) {
+	my $spotAttrib = $Attribs->item($k);
+	next unless $spotAttrib->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+	if ($spotAttrib->getName eq 'sequence_feature_id') {
+	  $tempFeature = $spotAttrib->getValue;
+	  $alSpotContent{usf_fk} = $usfTable{$tempFeature};
+
+	} elsif ($spotAttrib->getName eq 'x_image_location') {
+	  $tempFeature = $spotAttrib->getValue;
+	  my ($x,$y,$grid) = $tempFeature =~ /(\w+):(\w+):(\w+)/;
+	  if (defined $x && defined $y && defined $grid) {
+	    $alSpotContent{x_image_location} = $x;
+	    $alSpotContent{y_image_location} = $y;
+	    $alSpotContent{grid_image_location} = $grid;
+	  } else {
+	    $alSpotContent{$spotAttrib->getName} = $spotAttrib->getValue;
+	  }
+	} else {
+	  $alSpotContent{$spotAttrib->getName} = $spotAttrib->getValue;
+	}
+      }
+
+      #get rid of id. I don't think we need to store this
+      if (exists($alSpotContent{id})) {
+	delete($alSpotContent{id});
+      }
+      my $tempId = pgInsert('AL_Spots', \%alSpotContent);
+      $usfAlsTable{$tempFeature} = $tempId;
+      $alsTable{$localId} = $tempId;
+    }
+  } #end of for -- looping over all the al spots
+
+  $datadoc->dispose;
+
+}
+
+
+sub parseExperimentSet {
+  my $tableName = 'ExperimentSet';
+  my $structure = $_[0];
+  #content will hold the values to be inserted, keys will be column names
+  my %content= ();
+  my $esId;
+  my $localId = $structure->getAttribute("id");
+  #loop over attributes, this is where all info is for ArrayLayout
+  my $Attribs = $structure->getAttributes;
+  my $count = $Attribs->getLength;
+
+  if ($count > 0) {
+    my $j;
+    for ($j=0; $j<$count; $j++) {
+      my $current = $Attribs->item($j);
+      next unless $current->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+      if ($current->getName eq 'contact_id') {
+	my @tempId = split / /, $linkTable{$current->getValue};
+	$content{us_fk} = $tempId[1];
+      } elsif ($current->getName eq 'group_id') {
+	my @tempId = split / /, $idTable{$current->getValue};
+	$content{gs_fk} = $tempId[1];
+      } elsif ($current->getName eq 'citation_id') {
+	my @tempId = split / /, $idTable{$current->getValue};
+	$content{cit_fk} = $tempId[1];
+      } else {
+	$content{$current->getName} = $current->getValue;
+      }
+    }
+    #since id is parsed in, need to get rid of it.
+    if (exists($content{id})) {
+      delete($content{id});
+    }
+  }
+
+  #now go through the elements experiment_set, there will be information for factors tables
+  my $tags = $structure->getChildNodes;
+  $count = $tags->getLength;
+  my $j;
+  for ($j=0; $j<$count; $j++) {
+    my $current = $tags->item($j);
+    next unless $current->getNodeType == 1; #1 is element type, 3 (text) parsed but ignored.
+    #there are three elements experiment_set_header, array, and array_analysis
+    if ($current->getNodeName eq 'experiment_set_header') {
+      my $esHeaderTags = $current->getChildNodes;
+      my $esHeaderCount = $esHeaderTags->getLength;
+      my $k;
+      for ($k=0; $k<$esHeaderCount; $k++) {
+	my $esHeaderTag = $esHeaderTags->item($k);
+	next unless $esHeaderTag->getNodeType == 1;
+	if ($esHeaderTag->getNodeName eq 'biology_description') {
+	  if ($esHeaderTag->getChildNodes->getLength > 0) {
+	    $content{$esHeaderTag->getNodeName} = $esHeaderTag->getFirstChild->getNodeValue;
+	  }
+	} elsif ($esHeaderTag->getNodeName eq 'analysis_description') {
+	  if ($esHeaderTag->getChildNodes->getLength > 0) {
+	    $content{$esHeaderTag->getNodeName} = $esHeaderTag->getFirstChild->getNodeValue;
+	  }	
+	} elsif ($esHeaderTag->getNodeName eq 'experimental_factors_list') {
+	  #need to insert experimentSet
+	  $esId = pgInsert($tableName, \%content);
+
+	  #now the factors
+	  my $factorTableName = 'ExperimentFactors';
+	  my $factors = $esHeaderTag->getChildNodes;
+	  my $factorCount = $factors->getLength;
+	  my $l;
+	  for ($l=0; $l<$factorCount; $l++) {  #each factor
+	    my $factor = $factors->item($l);
+	    next unless $factor->getNodeType == 1;
+	    my %factorContent = (es_fk => $esId);
+	    my $Attribs = $factor->getAttributes;
+	    my $attCount = $Attribs->getLength;
+	    my $factorId = $factor->getAttribute("id");
+	    if ($attCount>0) {
+	      my $m;
+	      for ($m=0; $m<$attCount; $m++) {
+		my $attrib = $Attribs->item($m);
+		next unless $attrib->getNodeType == 2;
+		$factorContent{$attrib->getName} = $attrib->getValue;
+	      }
+	    }
+	    if (exists($factorContent{id})) {
+	      delete($factorContent{id});
+	    }
+	    #insert a factor
+	    $idTable{$factorId} = $factorTableName." ".pgInsert($factorTableName, \%factorContent);
+
+	  }
+	} 
+      }
+    } elsif ($current->getNodeName eq 'array') {
+      #current is pointing to an array node
+
+      $tableName = 'ArrayMeasurement';
+      $localId = $current->getAttribute("id");
+      my $name;
+      my %content = (
+         primary_es_fk   =>  $esId,
+      );
+
+      my $Attribs = $current->getAttributes;
+      my $attCount = $Attribs->getLength;
+
+      if ($attCount > 0) {
+	my $k;
+	for ($k=0; $k<$attCount; $k++) {
+	  my $attrib = $Attribs->item($k);
+	  next unless $attrib->getNodeType == 2; #2 is attribute type, others parsed but ignored.
+	  if ($attrib->getName eq 'owner_contact_id') {
+	    my @tempId = split / /, $linkTable{$attrib->getValue};
+	    $content{us_fk} = $tempId[1];
+	  } elsif ($attrib->getName eq 'group_id') {
+	    my @tempId = split / /, $idTable{$attrib->getValue};
+	    $content{gs_fk} = $tempId[1];
+	  } elsif ($attrib->getName eq 'hybridization_id') {
+	    my @tempId = split / /, $idTable{$attrib->getValue};
+	    $content{hybridization_id} = $tempId[1];
+	  } elsif ($attrib->getName eq 'array_layout_id') {
+	    my @tempId = split / /, $idTable{$attrib->getValue};
+	    $content{al_fk} = $tempId[1];
+	  } elsif ($attrib->getName eq 'sample_id') {
+	    my @tempId = split / /, $idTable{$attrib->getValue};
+	    $content{smp_fk} = $tempId[1];
+	  } elsif ($attrib->getName eq 'hybridization_stringency') {
+	    next unless defined($attrib->getValue);
+	    $content{hyb_stringency} = $attrib->getValue;
+	  } elsif ($attrib->getName eq 'image_analysis_sw_id') {
+	    my @tempId = split / /, $idTable{$attrib->getValue};
+	    $content{image_anal_sw_fk} = $tempId[1];
+	  }  elsif ($attrib->getName eq 'scanner_sw_id') {
+	    my @tempId = split / /, $idTable{$attrib->getValue};
+	    $content{scan_sw_fk} = $tempId[1];
+	  } elsif ($attrib->getName eq 'scanner_hw_id') {
+	    my @tempId = split / /, $idTable{$attrib->getValue};
+	    $content{scn_fk} = $tempId[1];
+	  } elsif ($attrib->getName eq 'image_file_name') {
+	    next unless defined($attrib->getValue);
+	    $content{file_name} = $attrib->getValue;
+	  } elsif ($attrib->getName eq 'name') {
+	    $name = $attrib->getValue;
+	  } else {
+	    $content{$attrib->getName} = $attrib->getValue;
+	  }
+	}
+	if (exists($content{id})) {
+	  delete($content{id});
+	}
+      }
+
+      #now get the elements there are array_header, and a list of sequence_features
+      my $arrayElements = $current->getChildNodes;
+      my $arrayElementCount = $arrayElements->getLength;
+      my $k;
+      my $equationType;
+      my $equation;
+      my $type;
+      my %amTable = (); #defined in each array to keep track of the measurements in each array
+      for ($k=0; $k<$arrayElementCount; $k++) {
+	my $arrayElement = $arrayElements->item($k);
+	next unless $arrayElement->getNodeType == 1;
+	if ($arrayElement->getNodeName eq 'array_header') {
+	  my $arrayHeaderItems = $arrayElement->getChildNodes;
+	  my $itemCount = $arrayHeaderItems->getLength;
+	  my $l;
+	  for ($l=0; $l<$itemCount; $l++) {
+	    my $item = $arrayHeaderItems->item($l);
+	    next unless $item->getNodeType == 1;
+	    if ($item->getNodeName eq 'description') {
+	      next unless $item->getChildNodes->getLength > 0;
+	      $content{description} = $item->getFirstChild->getNodeValue;
+	    } elsif ($item->getNodeName eq 'equation') {
+	      $equationType = $item->getAttribute("type");
+	      $equation = $item->getAttribute("value");
+	    } elsif ($item->getNodeName eq 'image_analysis_sw_params') {
+	      next unless $item->getChildNodes->getLength > 0;
+	      $content{image_anal_sw_params} = $item->getFirstChild->getNodeValue;
+	    } elsif ($item->getNodeName eq 'scanner_sw_params') {
+	      next unless $item->getChildNodes->getLength > 0;
+	      $content{scan_sw_params} = $item->getFirstChild->getNodeValue;
+	    } elsif ($item->getNodeName eq 'scanner_hw_params') {
+	      next unless $item->getChildNodes->getLength > 0;
+	      $content{scan_hw_params} = $item->getFirstChild->getNodeValue;
+	    } elsif ($item->getNodeName eq 'measurement_info') {
+	      my %localContent = %content;
+	      my $amName = $item->getAttribute("name");
+	      my $corrected = $item->getAttribute("background_corrected");
+	      if ( $corrected eq 'yes' or 'YES') {
+		$type = 'background corrected';
+	      } else {
+		$type = 'primary measurement';
+	      }
+	      $localContent{name} = $name." ".$amName;
+	      $localContent{type} = $type;
+	      $localContent{spot_measurement_units} = $item->getAttribute("unit");
+	      my $amId = pgInsert($tableName, \%localContent);
+	      $amTable{$amName} = $amId;
+	      
+	      #now factor values for each measurement
+	      my $factorValues = $item->getChildNodes;
+	      my $fvCount = $factorValues->getLength;
+	      my $m;
+	      for ($m=0; $m<$fvCount; $m++) {
+		my $factorValue = $factorValues->item($m);
+		next unless $factorValue->getNodeType == 1;
+		my %fvContent = (am_fk=>$amId);
+		my @temp = split / /, $idTable{$factorValue->getAttribute("factor_id")};
+		$fvContent{ef_fk} = $temp[1];
+		$fvContent{value} = $factorValue->getAttribute("value");
+		pgInsert('AM_FactorValues', \%fvContent);
+	      } #end of looping over factorValues
+	    } elsif ($item->getNodeName eq 'analysis') { #this means there's derived value!
+	      my %localContent = %content;
+	      $localContent{name} = $name." ".$equationType; 
+	      $localContent{equation} = $equation;
+	      $localContent{equation_type} = $equationType;
+	      $localContent{type} = 'derived';
+	      my $amId = pgInsert($tableName, \%localContent);
+	      $amTable{ratio} = $amId;
+	      
+	      #now insert tl and tl_factorValues tables
+	      my %tlContent = (
+		 es_fk       => $esId,
+                 ratio_am_fk => $amId,
+                 name        => $item->getAttribute("treatment_level_name"),
+              );
+	      
+	      my $tlId = pgInsert('TreatmentLevel', \%tlContent);
+	      my %tlfvContent = (
+		 tl_fk           => $tlId,
+                 value           => $item->getAttribute("value"),
+		 reference_value => $item->getAttribute("reference_value"),
+              );
+	      my @temp = split / /, $idTable{$item->getAttribute("factor_id")};
+	      $tlfvContent{ef_fk} = $temp[1];	  
+	      pgInsert('TL_FactorValues', \%tlfvContent);
+	    }
+	    
+	  } #end of looping over header elements
+#changes are made here to accomedate the external file structure.
+     	} elsif ($arrayElement->getNodeName eq 'data') {
+	  my $filekey = $arrayElement->getAttributeNode('external_file_id')->getValue;
+	  #parse in the datafile, same parser is used
+	  print "Reading GEMLDATA file...$exfileTable{$filekey}";
+	  #my $dataparser = new XML::DOM::Parser;
+	  my $datadoc = $parser->parsefile($exfileTable{$filekey});
+	  print "DONE.\n";
+	  my $gemldata = $datadoc->getDocumentElement;
+	  my $featureList = $gemldata->getElementsByTagName("feature");
+	  my $f = $featureList->getLength;	  
+	  my $cf;
+	  for ($cf=0; $cf<$f; $cf++) {
+	  
+	    my $arrayDataElement=$featureList->item($cf);
+	    next unless $arrayDataElement->getNodeType ==1;
+	    my $tableName = 'AM_Spots';
+	    my $usf_id = $usfTable{$arrayDataElement->getAttribute("sequence_feature_id")};
+	    my $spots = $arrayDataElement->getChildNodes;
+	    my $repCount = $spots->getLength;
+	    my $l;
+	    for ($l=0; $l<$repCount; $l++) {
+	      my $spot = $spots->item($l);
+	      next unless $spot->getNodeType == 1;
+	      my $flag = $spot->getAttribute("bad_value_flag");
+	      #als_id needed to deal with spot relicates
+	      my $als_id = $alsTable{$spot->getAttribute("array_layout_spot_id")};
+	      #now get each measurements
+	      my $measurements = $spot->getChildNodes;
+	      my $measCount = $measurements->getLength;
+	      my $m;
+	      for ($m=0; $m<$measCount; $m++) {
+		my $measurement = $measurements->item($m);
+		next unless $measurement->getNodeType == 1;
+		if ($measurement->getNodeName eq 'measurement') {
+		  my %measContent = (
+				     usf_fk   =>  $usf_id,
+				    );
+		  $measContent{am_fk} = $amTable{$measurement->getAttribute("name")};
+		  $measContent{spot_value} = $measurement->getAttribute("corrected_value");
+		  my $spot_id = pgInsert($tableName, \%measContent);
+		  my %spotLinkContent = (
+					 ams_fk   =>  $spot_id,
+					 als_fk   =>  $als_id,
+					);
+		  pgInsert('SpotLink', \%spotLinkContent);
+		} elsif ($measurement->getNodeName eq 'ratio') {
+		  my %measContent = (
+				     usf_fk   =>  $usf_id,
+				    );
+		  $measContent{am_fk} = $amTable{ratio};
+		  $measContent{spot_value} = $measurement->getAttribute("value");
+		  my $spot_id = pgInsert($tableName, \%measContent);
+		  my %spotLinkContent = (
+					 ams_fk   =>  $spot_id,
+					 als_fk   =>  $als_id,
+					);
+		  pgInsert('SpotLink', \%spotLinkContent);
+		}
+	      }
+	      
+	    }
+	  }
+
+	  #cleanup each datafile from memory
+	  $datadoc->dispose;
+	  #The next part is left in here to allow old GEML structure (data included in the file). This is not affecting anything, for now. 
+	} elsif ($arrayElement->getNodeName eq 'feature') {
+	  my $tableName = 'AM_Spots';
+	  my $usf_id = $usfTable{$arrayElement->getAttribute("sequence_feature_id")};
+	  my $spots = $arrayElement->getChildNodes;
+	  my $repCount = $spots->getLength;
+	  my $l;
+	  for ($l=0; $l<$repCount; $l++) {
+	    my $spot = $spots->item($l);
+	    next unless $spot->getNodeType == 1;
+	    my $flag = $spot->getAttribute("bad_value_flag");
+	    #als_id needed to deal with spot relicates
+	    my $als_id = $alsTable{$spot->getAttribute("array_layout_spot_id")};
+	    #now get each measurements
+	    my $measurements = $spot->getChildNodes;
+	    my $measCount = $measurements->getLength;
+	    my $m;
+	    for ($m=0; $m<$measCount; $m++) {
+	      my $measurement = $measurements->item($m);
+	      next unless $measurement->getNodeType == 1;
+	      if ($measurement->getNodeName eq 'measurement') {
+		my %measContent = (
+                   usf_fk   =>  $usf_id,
+		);
+		$measContent{am_fk} = $amTable{$measurement->getAttribute("name")};
+		$measContent{spot_value} = $measurement->getAttribute("corrected_value");
+		my $spot_id = pgInsert($tableName, \%measContent);
+		my %spotLinkContent = (
+                   ams_fk   =>  $spot_id,
+                   als_fk   =>  $als_id,
+		);
+		pgInsert('SpotLink', \%spotLinkContent);
+	      } elsif ($measurement->getNodeName eq 'ratio') {
+		my %measContent = (
+		   usf_fk   =>  $usf_id,
+                );
+		$measContent{am_fk} = $amTable{ratio};
+		$measContent{spot_value} = $measurement->getAttribute("value");
+		my $spot_id = pgInsert($tableName, \%measContent);
+		my %spotLinkContent = (
+		   ams_fk   =>  $spot_id,
+		   als_fk   =>  $als_id,
+		);
+		pgInsert('SpotLink', \%spotLinkContent);
+	      }
+	    }
+	    
+	  }
+
+	} #end of each feature 
+    
+
+      } #end of looping arrayElements
+    } 
+  } #looping over array and esheader
+}
+
+
+sub getExternalFileRefs {
+  my $extFileList = $geml->getElementsByTagName("external_file");
+  my $n = $extFileList->getLength;
+  print "ERROR: no external_file found in GEML.\n" unless $n>0;
+  my $i;
+  for ($i=0; $i<$n; $i++) {
+    my $node = $extFileList->item($i);
+    my $id = $node->getAttribute("id");
+    $exfileTable{$id} = $node->getAttribute("file_name");
+  }
+
+}
+
+
+###########################################################################################
+#And finally, pgInsert takes the tablename, content(a hash table whose keys are columns of
+#the table and values are values of the columns and insert the data into the table. It will
+#look in the index table to see if there is a so called _seq table that tracks the last key.
+#If it exists, last key inserted will be returned, if no _seq table found, no last pk value 
+#returned.
+###########################################################################################
+sub pgInsert {
+
+  my ($table, $contentRef) = @_;
+  my $columns = join(', ', keys %$contentRef);
+  my $values = join('\', \'', values %$contentRef);
+  my $pk;
+
+  #we should first look up to see if something already exists in the db
+  if (exists($lookupKeys{$table})) {
+    my $lookupColumn = $lookupKeys{$table};
+    my $sql = create_select_sql($dbh,
+				FROM=>[$table],
+				COLUMNS=>[$pkIndex{$table}],
+				WHERE=>"$lookupColumn='$$contentRef{$lookupColumn}'");
+
+    my $lookup = $dbh->prepare($sql);
+    dbi_error('pgInsert',$sql) if $lookup->err;
+    $lookup->execute();
+    dbi_error('pgInsert',$sql) if $lookup->err;
+    $pk = $lookup->fetchrow_array();
+    dbi_error('pgInsert',$sql) if $lookup->err;
+    $lookup->finish();
+  }
+  if (defined($pk)) {
+    print "information already exists in table $table.\n";
+    #pretend to insert and return key if needed.
+    if ($indexTables{$table} ne ' ') {
+      return $pk;
+    }
+  } else {
+    my $sql = create_insert_sql($dbh,$table,[keys %{$contentRef}]);
+    my $insert_sth = $dbh->prepare($sql);
+    dbi_error('pgInsert',$sql) if $insert_sth->err;
+    $insert_sth->execute(values %{$contentRef});
+    dbi_error('pgInsert',$sql) if $insert_sth->err;
+    $insert_sth->finish();
+
+    my $indexTableName = $indexTables{$table};
+    if ($indexTableName ne ' ') {
+      my $id = fetch_last_id($dbh,$table);
+      error('pgInsert',"No key returned for last insertion in $table") 
+	unless defined($id);
+      return $id;
+    }
+  } 
+}
+
+sub dbi_error {
+  my ($sub_name, $sql) = @_;
+  $dbh->rollback();
+  $dbh->disconnect();
+  croak "$sub_name: SQL = <$sql>, DBI=<$DBI::errstr>";
+}
+
+sub error {
+  my ($sub_name, $mesg) = @_;
+  $dbh->rollback();
+  $dbh->disconnect();
+  croak "$sub_name: $mesg";
+}
+
+sub Usage {
+    die("\nUSAGE:\t$0 [-S|-D|-U|-P|-f|-h]
+WHERE:
+\t-S <rdbms-name e.g. Postgres Sybase> Default is Postgres
+\t-D <database-name>                   Default is genexjz
+\t-U <user-name>                       Default is genex
+\t-P <password> 
+\t-f <filename>                        Default is template.geml
+\t-h Prints this usage message\n
+EMAIL:\tjz\@ncgr.org\n");
+}
+

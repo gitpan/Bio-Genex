@@ -1,0 +1,28 @@
+<?xml version="1.0" standalone="yes"?>
+<controlled_vocabulary db_table="CanonicalSequenceFeature" db_column="csf_type" cv_table="CSF_Type">
+  <comment type="definition">This control table is used by the
+Canonical Sequence Feature table to describe the type of feature that
+is referred to.
+</comment>
+<term name="gene_name"
+        description="The DNA is a copy of a gene, which may contain introns and regulatory regions as well as coding sequence"/>
+<term name="est_name"
+        description=""/>
+<term name="b_number"
+        description=""/>
+<term name="serial_orf_name"
+        description="the DNA is a copy of the coding sequence only but may not have been verified by isolation of a mRNA or protein in model organisms"/>
+<term name="genomic"
+        description="the DNA is derived from a genomic regions that may have no, one or many features"/>
+<term name="crna"
+        description="the DNA is a copy of a piece of DNA that normally codes for an RNA final product, such as rRNA , tRNA, hnRNA etc."/>
+<term name="cds"
+        description="the DNA is a copy of a transcript that has been isolated as an entity"/>
+</controlled_vocabulary>
+
+<!--
+*** emacs file mode definition ***
+Local Variables:
+ispell-personal-dictionary:"../.ispell-dict"
+End:
+-->
