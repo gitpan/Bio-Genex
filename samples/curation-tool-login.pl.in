@@ -1,7 +1,6 @@
 %%START_PERL%%
 
 use Carp;
-use POSIX 'strftime';
 use strict;
 %%GENEX_EXTRALIBS%%
 use CGI qw(:standard :html3);
@@ -20,7 +19,7 @@ my $dbh = Bio::Genex::current_connection();
 assert_table_defined($dbh,'Species');
 
 use Bio::Genex::Species;
-my @species = Bio::Genex::Species->get_objects('ALL');
+my @species = Bio::Genex::Species->get_all_objects();
 my @species = map {[$_->spc_pk(),$_->primary_scientific_name()]} @species;
 
 my (%labels,@values);

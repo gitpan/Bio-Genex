@@ -1,16 +1,15 @@
 %%START_PERL%%
-my $VERSION = '$Id: security-insert.pl.in,v 1.2.2.1 2001/01/15 18:52:05 jes Exp $ ';
+my $VERSION = '$Id: security-insert.pl.in,v 1.4 2001/02/05 16:33:24 jes Exp $ ';
 
 use strict;
 use blib;
 use Carp;
 use Getopt::Long;
 use File::Basename;
-use POSIX 'strftime';
 %%GENEX_EXTRALIBS%%
 use XML::DOM;
 
-use Genex qw($SU_USERNAME $SU_PASSWORD);
+use Bio::Genex qw($SU_USERNAME $SU_PASSWORD);
 use Bio::Genex::DBUtils qw(create_insert_sql fetch_last_id);
 use Bio::Genex::XMLUtils qw(assert_element);
 use Bio::Genex::UserSec;

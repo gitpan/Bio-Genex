@@ -1,28 +1,39 @@
 %%START_PERL%%
-my $VERSION = '$Id: cv-insert.pl.in,v 1.5.2.1 2001/01/15 18:52:04 jes Exp $ ';
+my $VERSION = '$Id: cv-insert.pl.in,v 1.8 2001/02/06 21:59:06 jes Exp $ ';
 
 use strict;
-use blib;
+# use blib;
 use Carp;
+use POSIX qw(strftime);
 use Getopt::Long;
 use File::Basename;
 %%GENEX_EXTRALIBS%%
 
 use XML::DOM;
 
-use Genex qw($SU_USERNAME $SU_PASSWORD);
+use Bio::Genex qw($SU_USERNAME $SU_PASSWORD $RO_USERNAME $RO_PASSWORD);
 use Bio::Genex::DBUtils qw(create_insert_sql);
 use Bio::Genex::XMLUtils qw(assert_element);
 use Bio::Genex::ExternalDatabase;
 
 use vars qw(%OPTIONS);
 
-$OPTIONS{ro} = '%%GENEX_RO_USER%%';
-$OPTIONS{su} = '%%GENEX_SU_USER%%';
-my $rc = GetOptions(\%OPTIONS, 'ro=s', 'su=s');
+$OPTIONS{ro} = $RO_USERNAME;
+$OPTIONS{su} = $SU_USERNAME;
+$OPTIONS{ro_pass} = $RO_PASSWORD;
+$OPTIONS{su_pass} = $SU_PASSWORD;
+$OPTIONS{dbname} = $Bio::Genex::DBNAME;
+my $rc = GetOptions(\%OPTIONS, 
+		    'ro=s', 'su=s', 
+		    'su_pass=s', 'ro_pass=s', 
+		    'name=s',
+		    'dbname=s');
 
 my $USAGE = <<"EOU";
-usage: $0 [-ro=readonly_user] [-su=super_user] file1 file2 ...
+usage: $0 --name=user_name [options] file1 file2 ...
+   options: --ro=readonly_user
+            --su=super_user
+            --dbname=name
 EOU
 
 die "Bad option: $rc\n$USAGE" unless $rc;
@@ -30,13 +41,64 @@ die "Bad option: $rc\n$USAGE" unless $rc;
 my @files;
 die "No files specified\n$USAGE\n" unless scalar @ARGV;
 
-# open up a writeable connection
-$Bio::Genex::DBNAME = 'genex';
-$Bio::Genex::USER = $SU_USERNAME;
-$Bio::Genex::PASSWORD = $SU_PASSWORD;
-$Bio::Genex::TRANSACTION = 0;	# transactions don't matter with DROP
+#
+# we need to use STDERR on all the print statements so 
+# they are visible when this file is run from within another 
+# scripts using backticks, i.e qx[cv-insert.pl].
+#
 
-my $dbh = Bio::Genex::current_connection();
+unless (exists $OPTIONS{name}) {
+ DB_INSTALLED_BY: while (1) {
+
+    print STDERR <<"EOT";
+
+You didn\'t identify yourself with the --name option. 
+
+I need to know your FULL EMAIL address so that I can store it in the
+GenexAdmin table in case trouble with this update is encountered.
+
+EOT
+    print STDERR "[$OPTIONS{name}] ? ";
+    my $tmp = <STDIN>;
+    $tmp =~ s/\s//g;
+    if (!$tmp) {
+      last DB_INSTALLED_BY;
+    } elsif ($tmp =~ /@/) {
+      $OPTIONS{name} = $tmp;
+      last DB_INSTALLED_BY;
+    } else {
+      print STDERR <<"EOE";
+         #### ERROR ####
+
+I need a full, email address such as "genex\@your.place.com"
+
+Please try again.
+
+EOE
+    }
+  }
+}
+
+my $DEBUG = 0;
+# open up a writeable connection
+my $dbh = Bio::Genex::current_connection(USER=>$OPTIONS{su},
+					 PASSWORD=>$OPTIONS{su_pass},
+					 DBNAME=>$OPTIONS{dbname},
+					 TRANSACTION=>0,
+					);
+#
+# We prompt the user just to make sure we're using the correct DB
+#
+print STDERR <<EOT;
+
+Update Controlled Vocabulary Tables for DB: $OPTIONS{dbname}
+
+Hit [Enter] to continue
+EOT
+
+$_ = <STDIN>;
+
+my @tables;
 foreach my $infile (@ARGV) {
   my $PARSER = XML::DOM::Parser->new();
   my $DOC = $PARSER->parsefile($infile);
@@ -47,6 +109,7 @@ foreach my $infile (@ARGV) {
   my $curr_table = $cv_node->getAttribute('cv_table');
   error ($dbh,"cv_table attribute not defined for file: $infile")
     unless $curr_table ne '';
+  push(@tables,$curr_table);
 
   print STDERR "Handling $curr_table\n";
   print STDERR "  Dropping\n";
@@ -88,13 +151,34 @@ foreach my $infile (@ARGV) {
 	  $sth) unless $name ne '';
     my $description = $term_node->getAttribute('description');
     warn("No description for " . $term_node->toString() . "\n")
-      unless $description ne '';
+      if $description eq '' && $DEBUG;
 
     $sth->execute($name,$description);
     error($dbh,"SQL=<$sql>, DBI=<$DBI::errstr>",$sth) if $sth->err;
   }
   $sth->finish();
 }
+
+my $affected = join(',', @tables);
+
+#
+# FIXME
+#   I want to use Bio::Genex::timestamp(), but I can't
+#   because I'm being called by the DB v0.9 updater,
+#   and Genex.pm 2.6.0 is not yet installed
+#
+my $time = strftime('%%ISO8601_DATE_FORMAT%%',localtime);
+
+#
+# FIXME
+#   I want to use Bio::Genex::GenexAdmin, but I can't
+#   because I'm being called by the DB v0.9 updater,
+#   and Genex.pm 2.6.0 is not yet installed
+#
+my $sql = "INSERT INTO GenexAdmin (install_date,installed_by,description) values ('$time','$OPTIONS{name}','upgraded using $0, tables affected: $affected')";
+$dbh->do($sql);
+error("Couldn't insert GenexAdmin record: DBI=<$DBI::errstr>")
+  if $dbh->err;
 
 $dbh->disconnect();
 exit(0);

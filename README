@@ -1,6 +1,6 @@
 Bio::Genex -- Perl extension for querying a GeneX gene expression DB
 
-   $Id: README,v 1.3 2001/01/14 22:00:06 jes Exp $
+   $Id: README,v 1.4 2001/01/26 10:22:04 jes Exp $
 
 LEGAL HOOP JUMPING
 ==================
@@ -45,22 +45,7 @@ command such as the following:
 
    $ tar zxvf Genex-X.Y.Z.tar.gz
 
-Perl
-----
-To install this package you need perl5.005 or later
-
-Best place to get the laterst version of perl is via 'CPAN' site
-nearest you
-
-   $ ftp any-CPAN-site 
-   $ cd CPAN/src/5.0
-   $ bin
-   $ get current.tar.gz
-
-If you have perl5.005 or later installed in the normal way you proceed
-with configuring Genex
-
-Congiguring
+Configuring
 -----------
 For Genex.pm to be useful, you must have already installed a working
 GeneX server on your system. In order for Genex.pm to properly

@@ -4,7 +4,7 @@ use strict;
 use vars qw($VERSION @ISA %EXPORT_TAGS @EXPORT_OK $DBNAME $HOST $PORT $TRANSACTION $USER $PASSWORD $DBMS $_CURRENT_CONNECTION $LOCAL %TABLE2CLASS %DEBUG $RO_USERNAME $RO_PASSWORD $SU_USERNAME $SU_PASSWORD);
 use Carp;
 use DBI;
-
+use POSIX qw(strftime);
 require Exporter;
 
 use Bio::Genex::DBUtils qw(create_select_sql);
@@ -15,9 +15,9 @@ use Bio::Genex::Fkey qw(:FKEY);
 # Items to export into callers namespace by default. Note: do not export
 # names by default without a very good reason. Use EXPORT_OK instead.
 # Do not simply export all your public functions/methods/constants.
-@EXPORT_OK = qw(undefined $RO_USERNAME $RO_PASSWORD $SU_USERNAME $SU_PASSWORD);
+@EXPORT_OK = qw(undefined timestamp $RO_USERNAME $RO_PASSWORD $SU_USERNAME $SU_PASSWORD);
 
-$VERSION = '2.4.0';
+$VERSION = '2.6.0';
 
 # Preloaded methods go here.
 
@@ -145,9 +145,19 @@ the Genex hierarchy.
 
 =over 4
 
-=item current_connection(%args);
+=item timestamp();
 
-=pod
+Returns a formatted timestring use POSIX::strftime(). The timeformat
+used is the ISO8601 conformant string: '%%ISO8601_DATE_FORMAT%%'.
+
+=cut
+
+sub timestamp {
+  return strftime('%%ISO8601_DATE_FORMAT%%',localtime);
+}
+
+
+=item current_connection(%args);
 
 Genex caches a single database handle.  Calling
 C<current_connection()> will call C<Bio::Genex::_connect()> if a connection
@@ -394,8 +404,8 @@ sub undefined {
 	if ($class_to_fetch->linking_table) {
 	  my $t2pk_ref = $class_to_fetch->table2pkey();
 	  push(@args,pkey_link=>$t2pk_ref->{$calling_class});
-	}
-	$val = $class_to_fetch->get_objects({@args},'ALL');
+	} 
+	$val = $class_to_fetch->get_all_objects({@args},'ALL');
       }
     } elsif ($fkey_ref->fkey_type() eq FKEY_OTM_LT ||
 	     $fkey_ref->fkey_type() eq FKEY_OTM ||

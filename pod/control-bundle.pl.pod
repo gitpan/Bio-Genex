@@ -1,7 +1,7 @@
 =head1 NAME
 
 B<control-bundle.pl>: a CGI script for creating a Gene Expression
-Markup Language (GEML) control bundle file.
+Markup Language (GeneXML) control bundle file.
 
 =head1 SYNOPSIS
 
@@ -30,7 +30,7 @@ Passed directly to L<xml-write.pl> as --password option.
 
 =head1 IMPLEMENTATION
 
-The script calls L<xml-write.pl> internally to generate the GEML
+The script calls L<xml-write.pl> internally to generate the GeneXML
 file. It I<does not> currently specifies either the --include_usf or
 the --include_al options which means that neither user sequence
 feature information nor array layout information will be included in

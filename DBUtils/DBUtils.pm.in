@@ -5,7 +5,7 @@
 package Bio::Genex::DBUtils;
 
 use strict;
-use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $CGIURL $DEBUG %TABLES $NO_FETCH_ALL $NO_FETCH_DISTINCT %EXPORT_TAGS);
+use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $CGIURL $DEBUG %TABLES %EXPORT_TAGS);
 use Carp;
 
 use DBI;
@@ -20,6 +20,19 @@ require Exporter;
 # Do not simply export all your public functions/methods/constants.
 @EXPORT_OK = qw(assert_table_defined 
 		assert_dbh
+		assert_species
+		assert_protocol
+		assert_contact
+		assert_usersec
+		assert_externaldb
+		assert_chromosome
+		assert_scanner
+		assert_software
+		assert_spotter
+		assert_blasthit
+		assert_groupsec
+		assert_array
+		assert_experiment
 		create_insert_sql
 		create_update_sql
 		create_select_sql
@@ -29,7 +42,7 @@ require Exporter;
 		fetch_es_ids
 		fetch_es_species
 		fetch_am_ids
-		fetch_fkey_list
+		fetch_db_ids_for_species
 		fetch_spot_data
 		output_spot_data
 		lookup_usf_id 
@@ -47,13 +60,26 @@ require Exporter;
 			     )],
 		ASSERT => [qw(assert_table_defined 
 			      assert_dbh
+			      assert_species
+			      assert_externaldb
+			      assert_blasthit
+			      assert_contact
+			      assert_usersec
+			      assert_groupsec
+			      assert_protocol
+			      assert_scanner
+			      assert_software
+			      assert_chromosome
+			      assert_spotter
+			      assert_array
+			      assert_experiment
 			     )],
 		FETCH => [qw(fetch_user_al_ids
 			     fetch_last_id
+			     fetch_db_ids_for_species
 			     fetch_es_ids
 			     fetch_es_species
 			     fetch_am_ids
-			     fetch_fkey_list
 			     fetch_spot_data
 			    )],
 	       );
@@ -61,9 +87,6 @@ Exporter::export_ok_tags('CREATE', 'ASSERT', 'FETCH');
 
 $VERSION = '0.02';
 $DEBUG = 0;
-$NO_FETCH_ALL = 0;
-$NO_FETCH_DISTINCT = 0;
-
 $CGIURL = '%%GENEX_CGI_URL%%';
 
 =head1 NAME
@@ -101,12 +124,6 @@ DBUtils - a module for useful Database utilities
 
   @ids = fetch_am_ids($experiment_set_pk, 
                       @array_measurement_types);
-
-  $array_ref = fetch_fkey_list($dbh,
-                               $table_name,
-                               $column_name,
-                               $pkey,
-                               $rec_level);
 
   $exp_set = fetch_spot_data($es_pk,@am_types);
 
@@ -397,6 +414,85 @@ sub assert_table_defined
 
   die "Table $table not found" unless $found;
 }
+
+sub assert_blasthit {
+  my $blasthit = shift;
+  croak "Not a valid BlastHits entry" unless 
+    ref($blasthit) eq 'Bio::Genex::BlastHits';
+}
+
+sub assert_species {
+  my $species = shift;
+  croak "Not a valid Species" unless 
+    ref($species) eq 'Bio::Genex::Species';
+}
+
+sub assert_contact {
+  my $contact = shift;
+  croak "Not a valid Contact" unless 
+    ref($contact) eq 'Bio::Genex::Contact';
+}
+
+sub assert_usersec {
+  my $usersec = shift;
+  croak "Not a valid UserSec" unless 
+    ref($usersec) eq 'Bio::Genex::UserSec';
+}
+
+sub assert_groupsec {
+  my $groupsec = shift;
+  croak "Not a valid GroupSec" unless 
+    ref($groupsec) eq 'Bio::Genex::GroupSec';
+}
+
+sub assert_chromosome {
+  my $chromosome = shift;
+  croak "Not a valid Chromosome" unless 
+    ref($chromosome) eq 'Bio::Genex::Chromosome';
+}
+
+sub assert_protocol {
+  my $protocol = shift;
+  croak "Not a valid Protocol" unless 
+    ref($protocol) eq 'Bio::Genex::Protocol';
+}
+
+sub assert_scanner {
+  my $scanner = shift;
+  croak "Not a valid Scanner" unless 
+    ref($scanner) eq 'Bio::Genex::Scanner';
+}
+
+sub assert_software {
+  my $software = shift;
+  croak "Not a valid Software" unless 
+    ref($software) eq 'Bio::Genex::Software';
+}
+
+sub assert_spotter {
+  my $spotter = shift;
+  croak "Not a valid Spotter" unless 
+    ref($spotter) eq 'Bio::Genex::Spotter';
+}
+
+sub assert_array {
+  my $array = shift;
+  croak "Not a valid Array" unless 
+    ref($array) eq 'Bio::Genex::ArrayMeasurement';
+}
+
+sub assert_experiment {
+  my $experiment = shift;
+  croak "Not a valid Experiment" unless 
+    ref($experiment) eq 'Bio::Genex::ExperimentSet';
+}
+
+sub assert_externaldb {
+  my $externaldb = shift;
+  croak "Not a valid ExternalDatabase" unless 
+    ref($externaldb) eq 'Bio::Genex::ExternalDatabase';
+}
+
 #----------------------------------------------------------------------
 
 =item lookup_contact_id($dbh,$contact_name,$approx)
@@ -566,11 +662,8 @@ sub check_password {
   assert_dbh($dbh);
 
   require Bio::Genex::UserSec;
-  my @users = Bio::Genex::UserSec->get_objects({column=>'login',value=>$user_name});
-  die "Bio::Genex::DBUtils::check_password: found more than one user for login: $user_name"
-    if scalar @users > 1;
-  die "Bio::Genex::DBUtils::check_password: found more no users for login: $user_name"
-    if scalar @users < 1;
+  my @users = Bio::Genex::UserSec->get_all_objects({column=>'login',value=>$user_name});
+  return undef if scalar @users != 1;
 
   # passwords are stored using crypt(). The first two letters of the login
   # are used for salt
@@ -593,7 +686,7 @@ sub fetch_es_ids {
   require Bio::Genex::ExperimentSet;
   my @objects;
   my @ids;
-  push(@objects, Bio::Genex::ExperimentSet->get_objects('ALL'));
+  push(@objects, Bio::Genex::ExperimentSet->get_all_objects());
   foreach (@objects) {
     $_->fetch();
     push(@ids,$_->es_pk);
@@ -822,96 +915,6 @@ EOF
   }
 }
 
-=item fetch_fkey_list(dbh=>$dbh,calling_class=>$table_name,class_to_fetch=>$table_name,column_to_fetch=>$column_name,value_to_fetch=>$pkey)
-
-B<Parameters:> C<dbh>: a database handle; C<calling_class>: the name
-of the class requesting the data; C<class_to_fetch> the name of the
-table to lookup the data from; C<column_to_fetch>: the name of foreign
-key in C<class_to_fetch> that refers to C<calling_class>;
-C<value_to_fetch>: the value of C<column_to_fetch> to use in the
-C<WHERE> clause.
-
-B<Control Variables:> Setting C<$Bio::Genex::DBUtils::NO_FETCH_DISTINCT>
-instructs fetch_fkey_list to not use the C<DISTINCT> SQL keyword in
-the query (the default is to use C<DISTINCT>. Setting
-C<$Bio::Genex::DBUtils::NO_FETCH_ALL> instructs the method to not set the
-C<fetch_all> parameter when calling C<new()> on each object (the
-default is to use C<fetch_all>).
-
-=cut
-  
-sub fetch_fkey_list {
-  my (%args) = @_;
-  foreach (qw(dbh 
-	      calling_class 
-	      class_to_fetch 
-	      column_to_fetch 
-	      value_to_fetch)) {
-    die "Must specify $_ argument to DBUtils::fetch_fkey_list" 
-      unless exists $args{$_};
-  }
-  my $dbh = $args{dbh};
-  assert_dbh($dbh);
-
-  # if we are given class names, translate them to table names
-  $args{class_to_fetch} =~ s/Bio::Genex:://;
-  $args{calling_class} =~ s/Bio::Genex:://;
-
-  # make sure the fkey points to a real table
-  assert_table_defined($dbh,$args{class_to_fetch});
-
-  # get the primary key name for the foreign table
-  my $class = 'Bio::Genex::' . $args{class_to_fetch};
-  # we specify calling_class in case $class is a linking table
-  eval "require $class;";
-  die "Bio::Genex::DBUtils::fetch_fkey_list: Couldn't eval $class: $@" if $@;
-  my $fkey_pkey_name =   $class->pkey_name($args{calling_class});
-
-  croak "No PKEY for $args{class_to_fetch}" unless defined $fkey_pkey_name;
-  my @sql_args = (COLUMNS=>[$fkey_pkey_name],
-		  FROM=>[$args{class_to_fetch}], 
-		  WHERE=>"$args{column_to_fetch} = '$args{value_to_fetch}'");
-  {
-    no strict 'refs';
-    my $limit = $ {"${class}::LIMIT"};
-    if ($limit) {
-      push(@sql_args,LIMIT=>$limit);
-    }
-  }
-  unless ($NO_FETCH_DISTINCT) {
-    push(@sql_args,DISTINCT=>1);
-  }
-  my $sql = create_select_sql($dbh,@sql_args);
-  my $sth = $dbh->prepare($sql) || carp $DBI::errstrstr;
-  $sth->execute() || carp $DBI::errstr;
-
-  my @objs;
-  my $i;
-  while (my $ref = $sth->fetchrow_arrayref()) {
-    $i++;
-    print STDERR "Accessing $args{class_to_fetch} $i\n" 
-      if $DEBUG && $i % 250 == 0;
-
-    carp $DBI::errstr if $sth->err;
-
-    # now that we have the primary key, we create a new instance
-    my $obj;
-    my @new_args = (id=>$ref->[0]);
-    unless ($NO_FETCH_ALL) {
-      push(@new_args, fetch_all=>1);
-    }
-    if ($class->linking_table) {
-      push(@new_args, pkey_link=>$fkey_pkey_name);
-    } 
-    $obj = $class->new(@new_args);
-
-    # and store the completed object
-    push(@objs,$obj);
-  }
-  $sth->finish();
-  return \@objs;
-}
-
 =item fetch_user_al_ids($us_fk)
 
 Find all ArrayLayouts for a given user.
@@ -935,10 +938,37 @@ sub fetch_user_al_ids {
 			     );
   my $layout_ref = $dbh->selectall_arrayref($sql)->[0];
   die $DBI::errstr if $dbh->err;
-  return unless defined $layout_ref;
+  return undef unless defined $layout_ref;
   return @{$layout_ref};
 }
 
+=item fetch_db_ids_for_species($spc_fk)
+
+Find all ExternalDatabases that are referenced by the
+UserSequenceFeatures for a given Species.
+
+Return Value:
+   a list of ExternalDatabase ids or undef if none.
+
+=cut
+
+sub fetch_db_ids_for_species {
+  my $spc_fk = shift;
+  my $dbh = Bio::Genex::current_connection();
+
+  assert_table_defined($dbh,'UserSequenceFeature');
+  assert_table_defined($dbh,'USF_ExternalDBLink');
+  my $sql = create_select_sql($dbh,
+			      COLUMNS=>['db_name'],
+			      FROM=>['UserSequenceFeature','USF_ExternalDBLink'],
+			      WHERE=>"usf_fk=usf_pk AND spc_fk=$spc_fk",
+			      DISTINCT=>1,
+			     );
+  my $db_ref = $dbh->selectall_arrayref($sql)->[0];
+  die $DBI::errstr if $dbh->err;
+  return undef unless defined $db_ref;
+  return @{$db_ref};
+}
 
 =item fetch_es_species($es_pk)
 

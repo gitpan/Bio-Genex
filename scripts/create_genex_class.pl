@@ -1,15 +1,16 @@
 #!/usr/local/bin/perl -w
-# cvs id: $Id: create_genex_class.pl,v 1.27.2.1 2001/01/15 18:52:04 jes Exp $ 
+# cvs id: $Id: create_genex_class.pl,v 1.31 2001/02/06 19:06:24 jes Exp $ 
 
 use strict;
 use Carp;
-use blib;
+# use blib;
 use Data::Dumper;
 use Cwd;
 
 use constant COLUMN_FILE => 'column2name';
 
 # import the fkey constants
+use lib '..';
 use Bio::Genex::Fkey qw(:FKEY);
 
 # this assumes the script is run in the top level Genex dir
@@ -516,7 +517,7 @@ print OUT <<"EOT";
 #
 # created on $time by $0 $arguments
 #
-# cvs id: \$Id\$ 
+# cvs id: \$Id: create_genex_class.pl,v 1.31 2001/02/06 19:06:24 jes Exp $ 
 #
 ##############################
 package $full_module_name;
@@ -547,13 +548,13 @@ foreach my $fkey (@FKEY_LIST) {
 
 # start a section with variable expansion *enabled*
 print OUT <<"EOT";
-use ObjectTemplate 0.21;
+use Class::ObjectTemplate::DB 0.21;
 
 use vars qw(\$VERSION \@ISA \@EXPORT \@EXPORT_OK \$FKEYS \$COLUMN2NAME \$NAME2COLUMN \$COLUMN_NAMES \%_CACHE \$USE_CACHE \$LIMIT \$FKEY_OBJ2RAW \$TABLE2PKEY);
 
 require Exporter;
 
-\@ISA = qw(ObjectTemplate Exporter);
+\@ISA = qw(Class::ObjectTemplate::DB Exporter);
 
 # Items to export into callers namespace by default. Note: do not export
 # names by default without a very good reason. Use EXPORT_OK instead.
@@ -735,7 +736,7 @@ if (scalar @controlled) {
   print OUT <<"EOT";
 
 sub get_terms {
-  return map {\$_->term_string} shift->get_objects('ALL');
+  return map {\$_->term_string} shift->get_all_objects();
 }
 sub get_vocabs {
   return qw($vocab_string);
@@ -830,6 +831,137 @@ EOT
 }
 
 
+# start a section with *no* variable expansion
+print OUT <<'EOT';
+#
+# a workhorse function for retrieving ALL objects of a class
+#
+sub get_all_objects {
+  my ($class) = shift;
+  my @objects;
+  my $COLUMN2FETCH;
+  my $VALUE2FETCH;
+  my $pkey_name;
+  my $has_args = 0;
+EOT
+
+if ($IS_LINKING_TABLE) {
+  # start a section with variable expansion *enabled*
+  print OUT <<"EOT";
+
+  # we are a linking table so the pkey_link must be set
+  # that means the first element of \@ids must be the string
+  # 'pkey_link' and the second must be the value
+  die "$ {full_module_name}::get_objects: must set 'pkey_link' for linking class" 
+    unless ref(\$_[0]) eq 'HASH' && exists \$_[0]->{pkey_link};
+  {
+    # we were called with an anonymous hash as the first parameter
+    # grab it and parse the parameter => value pairs
+    my \$hashref = shift;
+    \$pkey_name = \$hashref->{pkey_link};
+EOT
+
+} else {
+  # start a section with *no* variable expansion
+  print OUT <<'EOT';
+  $pkey_name = $class->pkey_name();
+  if (ref($_[0]) eq 'HASH') {
+    # we were called with an anonymous hash as the first parameter
+    # grab it and parse the parameter => value pairs
+    my $hashref = shift;
+EOT
+}
+
+# start a section with variable expansion *enabled*
+print OUT <<"EOT";
+    \$has_args = 1;
+    \$COLUMN2FETCH =  \$hashref->{column} if exists \$hashref->{column};
+    \$VALUE2FETCH =  \$hashref->{value} if exists \$hashref->{value};
+    die "$ {full_module_name}::get_all_objects: Must define both 'column' and 'value'" 
+      if ((defined \$VALUE2FETCH) && not (defined \$COLUMN2FETCH)) || 
+          ((defined \$COLUMN2FETCH) && not (defined \$VALUE2FETCH));
+  }
+
+  my \@ids;
+
+  # using class methods seems indirect, but it deals
+  # properly with inheritance
+  my \$FROM = [\$class->table_name()];
+
+  # we fetch *all* columns, so that we can populate the new objects
+  my \$COLUMNS = ['*'];
+
+  my \$dbh = Bio::Genex::current_connection();
+  my \@args = (COLUMNS=>\$COLUMNS, FROM=>\$FROM);
+  if (defined \$COLUMN2FETCH) {
+    my \$where =  "\$COLUMN2FETCH = ". \$dbh->quote(\$VALUE2FETCH);
+    push(\@args,WHERE=>\$where);
+  }
+  push(\@args,LIMIT=>\$LIMIT) if defined \$LIMIT;
+  my \$sql = create_select_sql(\$dbh,\@args);
+  my \$sth = \$dbh->prepare(\$sql) 
+    or die "$ {full_module_name}::get_all_objects:\\nSQL=<\$sql>,\\nDBI=<\$DBI::errstr>";
+  \$sth->execute() 
+    or die "$ {full_module_name}::get_all_objects:\\nSQL=<\$sql>,\\nDBI=<\$DBI::errstr>";
+
+  # if there were no objects, return. decide whether to return an 
+  # empty list or an empty arrayref using wantarray
+  unless (\$sth->rows()) {
+    return () if wantarray;
+    return []; # if not wantarray
+  }
+
+  # we use the 'NAME' attribute of the statement handle to get the
+  # list of columns that were fetched.
+  my \@column_names = \@{\$sth->{NAME}};
+  my \$rows = \$sth->fetchall_arrayref();
+  die "$ {full_module_name}::get_all_objects:\\nSQL=<\$sql>,\\nDBI=<\$DBI::errstr>" 
+    if \$sth->err;
+  foreach my \$col_ref (\@{\$rows}) {
+    # we create a blank object, and populate it with data ourselves
+    my \$obj = \$class->new();
+
+    # %fetched_attrs is used to track which attributes have
+    # already been retrieved from the DB, so that Bio::Genex::undefined
+    # doesn't try to fetch them a second time if their value is undef
+    my %fetched_attrs;
+    for (my \$i=0;\$i < scalar \@column_names; \$i++) {
+      no strict 'refs';
+      my \$col = \$column_names[\$i];
+      \$obj->\$col(\$col_ref->[\$i]);
+
+      # record the column as fetched
+      \$fetched_attrs{\$col}++;
+    }
+    # store the record of the fetched columns
+    \$obj->fetched_attr(\\\%fetched_attrs);
+    \$obj->fetched(1);
+
+EOT
+if ($IS_LINKING_TABLE) {
+  # start a section with *no* variable expansion
+  print OUT <<'EOT';
+    # we are a linking table so the pkey_link attr must be set
+    $obj->set_attribute('pkey_link',$pkey_name);
+
+EOT
+}
+    # start a section with variable expansion *enabled
+    print OUT <<'EOT';
+    # now we set the id so that delayed-fetching will work for
+    # the OO attributes
+    $obj->id($obj->get_attribute("$pkey_name"));
+    push(@objects,$obj);
+  }
+  $sth->finish();
+
+  # decide whether to return a list or an arrayref using wantarray
+  return @objects if wantarray;
+  return \@objects; # if not wantarray
+}
+
+EOT
+
 # start a section with variable expansion *enabled*
 print OUT <<"EOT";
 #
@@ -838,161 +970,55 @@ print OUT <<"EOT";
 sub get_objects {
   my (\$class) = shift;
   my \@objects;
-  my \$COLUMN2FETCH;
-  my \$VALUE2FETCH;
+EOT
+if ($IS_LINKING_TABLE) {
+  print OUT <<"EOT";		# start a section with variable expansion *enabled*
   my \$pkey_name;
-  my \$has_args = 0;
+
+  # we are a linking table so the pkey_link must be set
+  # that means the first element of \@ids must be the string
+  # 'pkey_link' and the second must be the value
+  die "$ {full_module_name}::get_objects: must set 'pkey_link' for linking class" 
+    unless (ref(\$_[0]) eq 'HASH') && exists \$_[0]->{pkey_link};
   if (ref(\$_[0]) eq 'HASH') {
-    \$has_args = 1;
     # we were called with an anonymous hash as the first parameter
     # grab it and parse the parameter => value pairs
     my \$hashref = shift;
-    \$COLUMN2FETCH =  \$hashref->{column} if exists \$hashref->{column};
-    \$VALUE2FETCH =  \$hashref->{value} if exists \$hashref->{value};
-    die "$ {full_module_name}::get_objects: Must define both 'column' and 'value'" 
-      if ((defined \$VALUE2FETCH) && not (defined \$COLUMN2FETCH)) || 
-          ((defined \$COLUMN2FETCH) && not (defined \$VALUE2FETCH));
-EOT
-
-if ($IS_LINKING_TABLE) {
-  # start a section with variable expansion *enabled*
-  print OUT <<"EOT";
-
-    # we are a linking table so the pkey_link must be set
-    # that means the first element of \@ids must be the string
-    # 'pkey_link' and the second must be the value
-    die "$ {full_module_name}::get_objects: must set 'pkey_link' for linking class" 
-      unless exists \$hashref->{pkey_link};
     \$pkey_name = \$hashref->{pkey_link};
   }
 EOT
-
-} else {
-  # start a section with *no* variable expansion
-  print OUT <<'EOT';
-  }
-  $pkey_name = $class->pkey_name();
-EOT
-  
-}
-
-# start a section with variable expansion *enabled*
-print OUT <<"EOT";
-  my \@ids = \@_;
-  if (scalar \@ids == 0 && ! \$has_args) {
-    croak("$ {full_module_name}::get_objects called with no ID's\n");
-  } elsif (scalar \@ids == 0 ||
-           (scalar \@ids == 1 && \$ids[0] eq 'ALL')) {
-    # the user is requesting all objects of type \$class from the DB
-
-    # empty the id list
-    \@ids = ();
-
-EOT
-
-# start a section with variable expansion *enabled*
-print OUT <<"EOT";
-
-    # using class methods seems indirect, but it deals
-    # properly with inheritance
-    my \$FROM = [\$class->table_name()];
-
-    # we fetch *all* columns, so that we can populate the new objects
-    my \$COLUMNS = ['*'];
-  
-    my \$dbh = Bio::Genex::current_connection();
-    my \@args = (COLUMNS=>\$COLUMNS, FROM=>\$FROM);
-    if (defined \$COLUMN2FETCH) {
-      my \$where =  "\$COLUMN2FETCH = ". \$dbh->quote(\$VALUE2FETCH);
-      push(\@args,WHERE=>\$where);
-    }
-    push(\@args,LIMIT=>\$LIMIT) if defined \$LIMIT;
-    my \$sql = create_select_sql(\$dbh,\@args);
-    my \$sth = \$dbh->prepare(\$sql) 
-      or die "$ {full_module_name}::get_objects:\\nSQL=<\$sql>,\\nDBI=<\$DBI::errstr>";
-    \$sth->execute() 
-      or die "$ {full_module_name}::get_objects:\\nSQL=<\$sql>,\\nDBI=<\$DBI::errstr>";
-
-    # if there were no objects, return. decide whether to return an 
-    # empty list or an empty arrayref using wantarray
-    unless (\$sth->rows()) {
-      return () if wantarray;
-      return []; # if not wantarray
-    }
-
-    # we use the 'NAME' attribute of the statement handle to get the
-    # list of columns that were fetched.
-    my \@column_names = \@{\$sth->{NAME}};
-    my \$rows = \$sth->fetchall_arrayref();
-    die "$ {full_module_name}::get_objects:\\nSQL=<\$sql>,\\nDBI=<\$DBI::errstr>" 
-      if \$sth->err;
-    foreach my \$col_ref (\@{\$rows}) {
-      # we create a blank object, and populate it with data ourselves
-      my \$obj = \$class->new();
-
-      # %fetched_attrs is used to track which attributes have
-      # already been retrieved from the DB, so that Bio::Genex::undefined
-      # doesn't try to fetch them a second time if their value is undef
-      my %fetched_attrs;
-      for (my \$i=0;\$i < scalar \@column_names; \$i++) {
-	no strict 'refs';
-	my \$col = \$column_names[\$i];
-	\$obj->\$col(\$col_ref->[\$i]);
-
-	# record the column as fetched
-	\$fetched_attrs{\$col}++;
-      }
-      # store the record of the fetched columns
-      \$obj->fetched_attr(\\\%fetched_attrs);
-
-EOT
-if ($IS_LINKING_TABLE) {
-  # start a section with *no* variable expansion
-  print OUT <<'EOT';
-      # we are a linking table so the pkey_link attr must be set
-      $obj->set_attribute('pkey_link',$pkey_name);
-
-EOT
-}
-  # start a section with variable expansion *enabled
-  print OUT <<"EOT";
-      # now we set the id so that delayed-fetching will work for
-      # the OO attributes
-      \$obj->id(\$obj->get_attribute("\$pkey_name"));
-      push(\@objects,\$obj);
-    }
-    \$sth->finish();
-  } else {
-    # we have been called with an \@id_list
-    die "Can't use 'column' and 'value' specifiers with an \\\@id_list"
-      if defined \$COLUMN2FETCH || defined \$VALUE2FETCH;
-
-    my \$obj;
-    foreach (\@ids) {
-      if (\$USE_CACHE && exists \$_CACHE{\$_}) {
-  	\$obj = \$_CACHE{\$_};	# use it if it's in the cache
-      } else {
-  	my \@args = (id=>\$_);
-EOT
-
-if ($IS_LINKING_TABLE) {
-    # start a section with *no* variable expansion
-    print OUT <<'EOT';
-  	push(@args,'pkey_link'=>$pkey_name);
-EOT
-
 } 
+
+# start a section with variable expansion *enabled*
+print OUT <<"EOT";
+  if (ref(\$_[0]) eq 'HASH' || scalar \@_ == 0) {
+    croak("$ {full_module_name}::get_objects called with no ID's, perhaps you meant to use $ {full_module_name}::get_all_objects\n");
+  } 
+  my \@ids = \@_;
+  my \$obj;
+  foreach (\@ids) {
+    if (\$USE_CACHE && exists \$_CACHE{\$_}) {
+	\$obj = \$_CACHE{\$_};	# use it if it's in the cache
+    } else {
+	my \@args = (id=>\$_);
+EOT
+
+if ($IS_LINKING_TABLE) {
+  # start a section with *no* variable expansion
+  print OUT <<'EOT';
+    push(@args,'pkey_link'=>$pkey_name);
+EOT
+}
 
 # start a section with *no* variable expansion
 print OUT <<'EOT';
-  	$obj = $class->new(@args);
-  
-  	# if the id was bad, $obj will be undefined
-  	next unless defined $obj;
-  	$_CACHE{$_} = $obj if $USE_CACHE; # stick it in the cache for later
-      }
-      push(@objects, $obj);
+	$obj = $class->new(@args);
+
+	# if the id was bad, $obj will be undefined
+	next unless defined $obj;
+	$_CACHE{$_} = $obj if $USE_CACHE; # stick it in the cache for later
     }
+    push(@objects, $obj);
   }
   # decide whether to return a list or an arrayref using wantarray
   return @objects if wantarray;
@@ -1250,7 +1276,7 @@ EOT
 print OUT <<"EOT";
 
   # retrieving all instances from a table
-  my \@objects = $full_module_name->get_objects('ALL');
+  my \@objects = $full_module_name->get_all_objects();
 
   # retrieving the primary key for an object, generically
   my \$primary_key = \$$module_name->id();
@@ -1577,7 +1603,7 @@ if ($IS_LINKING_TABLE) {
 
 =item get_objects({pkey_link=>'$attributes[0]'}, \@id_list)
 
-=item get_objects('ALL')
+=item get_all_objects()
 
 =item get_objects({column=>'col_name',value=>'val'})
 
@@ -1599,10 +1625,6 @@ B<ERROR>: When using the \@id_list form of this method with a linking
 table, the 'C<pkey_list>' attribute B<must> be specified, otherwise an
 error will result. This is because linking tables have two possible
 columns to lookup from.
-
-By passing the 'ALL' parameter, get_objects() returns an instance for
-every entry in the table, and therefore, 'C<pkey_list>' doesn\'t need
-to be specified.
 
 By passing a hash reference that contains the 'column' and 'name'
 keys, the method will return all objects from the DB whose that have
@@ -1660,7 +1682,7 @@ B<NOTE:> Any modification of the primary key value will be discarded
 
 =item get_objects(\@id_list)
 
-=item get_objects('ALL')
+=item get_all_objects()
 
 =item get_objects({column=>'col_name',value=>'val'})
 
@@ -1675,8 +1697,7 @@ B<WARNING>: Passing incorrect id values to C<get_objects()> will cause
 a warning from C<$ {full_module_name}::initialize()>. Objects will be
 created for other correct id values in the list.
 
-By passing the 'ALL' parameter, C<get_objects()> returns an instance
-for every entry in the table.
+C<get_all_objects()> returns an instance for every entry in the table.
 
 By passing an anonymous hash reference that contains the 'column' and
 'name' keys, the method will return all objects from the DB whose that
@@ -1974,8 +1995,9 @@ risk.
 
 These classes are automatically generated by the
 create_genex_classes.pl script.  Each class is a subclass of the
-ObjectTemplate class (written by Sriram Srinivasan, described in
-I<Advanced Perl Programming>, and heavily modified by Jason
+Class::ObjectTemplate::DB class (which is in turn a subclass of
+Class::ObjectTemplate written by Sriram Srinivasan, described in
+I<Advanced Perl Programming>, and modified by Jason
 Stewart). ObjectTemplate implements automatic class creation in perl
 (there exist other options such as C<Class::Struct> and
 C<Class::MethodMaker> by Damian Conway) via an C<attributes()> method

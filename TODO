@@ -1,10 +1,24 @@
+Mon Feb  5 21:04:50 MST 2001
+* make GenexAdmin class
+
+Mon Jan 22 13:24:34 MST 2001
+* document (POD) db2xml
+* figure out how to keep all the .pl files from getting installed
+
+Sun Jan 21 08:35:44 MST 2001
+* db2xml: Find new way to specify how to download just specific user
+  information now that --user not required
+
+Fri Jan 19 22:24:57 MST 2001
+FIXED ==> * fetch is broken for linking tables
+
 Tue Dec 12 15:03:39 MST 2000
-* implement caching in control bundle retrieval
+FIXED ==> * implement caching in control bundle retrieval
 
 Sat Nov 11 14:22:16 MST 2000
 Priority 1 
 ==========
-* expset-login.pl CGI script needs to be updated to use cached data
+FIXED ==> * expset-login.pl CGI script needs to be updated to use cached data
 * Hatfield ES in DB needs to have its AM's updated (at least adding a
   new AM for each data point w/o the spot reps separated out
 * copyright and headers for all files
@@ -16,26 +30,26 @@ Priority 2
 * DB schema to support security and updates
 * DB schema to support separate one/two channel tables
 * MGED XML
-* checkin code to CVS - local
-* checkin code to CVS - openqenex
 * XDF
 * XML dump for Brown Hatfield
 
 Priority 3
 ==========
-* addgroup CGI script
-* test xml2db with output from db2xml
-* fix Genex.pm install
-* adduser CGI script
+FIXED ==> * addgroup CGI script
+FIXED ==> * test xml2db with output from db2xml
+FIXED ==> * fix Genex.pm install
+FIXED ==> * adduser CGI script
 * last_updated fields in DB
 * new DB security tables
 
 Wed Nov  8 19:40:26 MST 2000
-* create Bio::Genex::DBUtils::check_password()
-* ensure that scripts that access UserSec:password use check_password()
+FIXED ==> * create Genex::DBUtils::check_password()
+FIXED ==> * ensure that scripts that access UserSec:password use check_password()
+FIXED ==> * create Bio::Genex::DBUtils::check_password()
+FIXED ==> * ensure that scripts that access UserSec:password use check_password()
 
 Wed Nov  1 17:28:17 MST 2000
-* fix current_connection() to take parameters. rename it to be
+FIXED ==> * fix current_connection() to take parameters. rename it to be
   connect()
 
 Mon Oct 30 15:01:16 MST 2000
@@ -58,7 +72,7 @@ FIXED ==>  * get_objects() should not have the same result as
   * XMLUtils::pretty_print() must not remove all newlines
 FIXED ==>  * initialize() should only do DB query if the values have not been
     returned by a DB query.
-  * fix get_objects(@id) so that it functions identical to
+FIXED ==>   * fix get_objects(@id) so that it functions identical to
     get_objects('ALL') 
 
 Mon Oct 23 16:48:31 MST 2000
@@ -75,8 +89,8 @@ FIXED ==>   * gxfetch_array1.pl: wants to be split into a download, and analysis
 * Controlled Vocab issues
   * AL_DefaultSpotConcUnits.xml seems to be for individual spots not
     layout
-  * AL_IdentifierCode.xml is stupid
-  * CSF_Type.xml has extra terms
+FIXED ==>   * AL_IdentifierCode.xml is stupid
+FIXED ==>   * CSF_Type.xml has extra terms
 FIXED ==>  * ContactType.xml: technology_media, data_provider_protocol can't be
     used by DB; software_analysis overlaps with software_image
 FIXED ==>  * EF_MajorCategory.xml and EF_MinorCategory.xml need to be looked at
@@ -89,7 +103,7 @@ FIXED ==> * {USF,CSF}_ExternalDBLink has db_name() as an OO fkey method, it
   should have db_name_obj()
 
 Tue Oct  3 12:35:33 MST 2000
-* changes for xml2db.pl: 
+FIXED ==> * changes for xml2db.pl: 
   * remove hard-coded dates (line 249)
   * switch to create_{insert,select}_sql()
   * switch to fetch_last_value() (line 1232)
@@ -101,16 +115,16 @@ Tue Oct  3 12:35:33 MST 2000
   * hard-coding of array_measurement type (line 997)
 
 Tue Sep 26 21:40:19 MST 2000
-* fix CSF_ExternalDBLink::db_name ==> two methods...
-* fix CanonicalSequenceFeature::relatedcsf_fk ==> two methods...
-* install_cgi only works with 5.6
+FIXED ==> * fix CSF_ExternalDBLink::db_name ==> two methods...
+FIXED ==> * fix CanonicalSequenceFeature::relatedcsf_fk ==> two methods...
+FIXED ==> * install_cgi only works with 5.6
 
 Mon Sep 25 14:54:58 MST 2000
 FIXED ==> * make Bio::Genex::undefined call fetch_fkey_list() for all OTM types, and
   then have fetch_fkey_list() decide whether to call get_matrix() or
   not depending on the status of a class variable that defaults to
   true for the LT classes.
-* Get rid of OTM_LT and OTM_LINK fkeys (and their _OO mirrors), and
+FIXED ==> * Get rid of OTM_LT and OTM_LINK fkeys (and their _OO mirrors), and
   replace their usage with OTM fkeys. This should be simple after
   replacing the $lt_fkey usage in create_genex_class.pl
 FIXED ==> * need to make MTO fkeys act like FKEY fkeys
@@ -147,7 +161,7 @@ FIXED ==> * Change the fkey code. The blah_fk() methods should always return
 * move Jiaye's XML2DB.pl to Genex.pm interface
 
 Thu Sep 21 14:41:57 MST 2000
-* fix length on ExternalDatabase:urls
+FIXED ==> * fix length on ExternalDatabase:urls
 FIXED ==> * why does pbrown experiment print 2 CSF tables
 
 Wed Sep 20 14:40:31 MST 2000
@@ -180,7 +194,7 @@ Sat Sep  9 00:22:08 MST 2000
 FIXED ==> * fix geml.dtd, so that <array> has all params
 
 Thu Sep  7 15:10:23 MST 2000
-* add checking to current_connection, so that if any of the connection
+FIXED ==> * add checking to current_connection, so that if any of the connection
   parameters are different than the settings for the current dbh,
   close the current connection and open a new one.
 
@@ -330,7 +344,7 @@ FIXED ==> * Fix problem with calling disconnect() on a handle stored by
 Mon May 22 16:58:30 MDT 2000
 FIXED ==> * find out why the Pat Brown user and group links don't work
 FIXED ==> * fix the trailing '/' problem on the Make parameters
-* Add these fkeys to HTMLUtils::post_process()
+FIXED ==> * Add these fkeys to HTMLUtils::post_process()
 FIXED  - ams_fk
 FIXED  - als_fk
 FIXED  - tl_fk

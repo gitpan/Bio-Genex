@@ -21,11 +21,13 @@ use vars qw($VERSION
 	    $TEST_SOFTWARE
 	    $TEST_SOFTWARE_NAME
 	    $TEST_ES
+	    $TEST_DB
 	    $TEST_ES_NAME
 	    $TEST_USERSEC
 	    $TEST_USERSEC_LOGIN
 	    $TEST_USF
 	    $TEST_USF_NAME
+	    $TEST_BLAST
 	   );
 use Carp;
 use DBI;
@@ -42,6 +44,7 @@ require Exporter;
 		$ECOLI_CHROM_LENGTH
 		$YEAST_CITATION
 		$YEAST_CITATION_AUTHORS
+		$TEST_DB
 		$TEST_ES
 		$TEST_ES_NAME
 		$TEST_CONTACT
@@ -54,12 +57,28 @@ require Exporter;
 		$ECOLI_SAMPLE_STRAIN
 		$TEST_SOFTWARE
 		$TEST_SOFTWARE_NAME
+		$TEST_BLAST
 		$TEST_USF
 		$TEST_USF_NAME
+		result
 	       );
 
 BEGIN {
   my $dbh = Bio::Genex::current_connection();
+  unless (defined $TEST_DB) {
+    my $sql = 'SELECT name FROM ExternalDatabase WHERE name ';
+    $sql .= 'LIKE \'%SGD%\'';
+    ($TEST_DB) =
+      @{$dbh->selectall_arrayref($sql)->[0]};
+    die $DBI::errstr if $dbh->err;
+  }
+  unless (defined $TEST_BLAST) {
+    my $sql = 'SELECT bh_pk FROM BlastHits WHERE match_accession =';
+    $sql .= ' \'test\'';
+    ($TEST_BLAST) =
+      @{$dbh->selectall_arrayref($sql)->[0]};
+    die $DBI::errstr if $dbh->err;
+  }
   unless (defined $TEST_USF && $TEST_USF_NAME) {
     my $sql = 'SELECT usf_pk,usf_name FROM UserSequenceFeature WHERE usf_name =';
     $sql .= ' \'b0001\'';
@@ -90,14 +109,14 @@ BEGIN {
   }
   unless (defined $TEST_GROUPSEC && $TEST_GROUPSEC_GROUP_NAME) {
     my $sql = 'SELECT gs_pk,group_name FROM GroupSec WHERE group_name=\'';
-    $sql .= 'Wes Hatfield group, UCI\'';
+    $sql .= 'test group\'';
     ($TEST_GROUPSEC, $TEST_GROUPSEC_GROUP_NAME) =
       @{$dbh->selectall_arrayref($sql)->[0]};
     die $DBI::errstr if $dbh->err;
   }
   unless (defined $TEST_CONTACT && $TEST_CONTACT_PERSON) {
-    my $sql = 'SELECT con_pk,contact_person FROM Contact WHERE contact_person=\'';
-    $sql .= 'G. Wesley Hatfield\'';
+    my $sql = 'SELECT con_pk,contact_person FROM Contact WHERE type=\'';
+    $sql .= 'test_user\' AND organization=\'test_organization\'';
     ($TEST_CONTACT, $TEST_CONTACT_PERSON) =
       @{$dbh->selectall_arrayref($sql)->[0]};
     die $DBI::errstr if $dbh->err;
@@ -140,4 +159,10 @@ BEGIN {
       @{$dbh->selectall_arrayref($sql)->[0]}; 
     die $DBI::errstr if $dbh->err;
   }
+}
+
+sub result {
+  my ($cond,$i) = @_;
+  print STDOUT "not " unless $cond;
+  print STDOUT "ok ", $i, "\n";
 }

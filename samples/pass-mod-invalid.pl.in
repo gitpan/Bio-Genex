@@ -10,7 +10,6 @@
 # script copyright (c) 2000 by NCGR.
 # All rights reserved.
 
-use POSIX 'strftime';
 use strict;
 %%GENEX_EXTRALIBS%%
 
@@ -124,7 +123,7 @@ Please send bug reports to genex@ncgr.org
 
 =head1 LAST UPDATED
 
-$Date: 2000/11/09 22:25:19 $ by jes@ncgr.org
+$Date: 2001/02/05 16:34:24 $ by jes@ncgr.org
 
 =head1 AUTHOR
 

@@ -1,5 +1,5 @@
 #!/usr/local/bin/perl -w
-# cvs id: $Id: make_classes.pl,v 1.15.2.1 2001/01/15 18:52:05 jes Exp $
+# cvs id: $Id: make_classes.pl,v 1.17 2001/02/06 19:05:13 jes Exp $
 
 use File::Basename;
 use File::stat;
@@ -28,14 +28,12 @@ my @PM;
        {target=>'ArrayLayout',
 	support=>['AL_Spots']},
        {target=>'Species',
-	support=>['CanonicalSequenceFeature',
-		  'UserSequenceFeature',
+	support=>['UserSequenceFeature',
 		  'Chromosome']},
        {target=>'ExperimentSet',
 	support=>['ArrayMeasurement',
 		  'HotSpots',
 		  'TreatmentLevel',
-		  'CitationLink',
 		  'ExperimentFactors']},
        {target=>'ArrayMeasurement',
 	support=>['AM_Spots',
@@ -55,9 +53,6 @@ my @PM;
 	support=>['SampleProtocols']},
        {target=>'Protocol',
 	support=>['SampleProtocols']},
-       {target=>'CanonicalSequenceFeature',
-	support=>['RelatedCSF',
-		  'CSF_ExternalDBLink']},
        {target=>'GroupSec',
 	support=>['GroupLink']},
        {target=>'UserSec',
@@ -69,12 +64,13 @@ my @PM;
 
        # simple classes with no supporting tables
        {target=>'Chromosome'},
+       {target=>'GenexAdmin'},
        {target=>'Contact'},
-       {target=>'Citation'},	# what about CitationLink???
+       {target=>'Citation'},
        {target=>'Software'},
        {target=>'Scanner'},
        {target=>'Spotter'},
-       {target=>'ExternalDatabase'}, # what about USF/CSF_ExternalDBLink???
+       {target=>'ExternalDatabase'}, 
        {target=>'BlastHits'},
        
        # linking table classes
@@ -84,13 +80,9 @@ my @PM;
        {target=>'SpotLink',linking=>1},
        {target=>'Treatment_AMs',linking=>1},
        {target=>'SampleProtocols',linking=>1},
-       {target=>'RelatedCSF',linking=>1},
        {target=>'USF_ExternalDBLink',linking=>1},
-       {target=>'CSF_ExternalDBLink',linking=>1},
        {target=>'TL_FactorValues',linking=>1},
        {target=>'GroupLink',linking=>1},
-       {target=>'CitationLink',linking=>1},
-       {target=>'UserCanonicalLink',linking=>1},
        
        # controlled vocabular classes
        {target=>'ControlledVocab',
@@ -104,7 +96,6 @@ my @PM;
 		     'AM_EquationType',
 		     'AM_SpotMeasurementUnits',
 		     'AM_Type',
-		     'CSF_Type',
 		     'ContactType',
 		     'EF_MajorCategory',
 		     'EF_MinorCategory',
@@ -142,44 +133,46 @@ if ($make_pm) {
     next TARGET  if $CONTROL_ONLY && ! exists $args{controlled};
     next TARGET  if $LINKING_ONLY && ! exists $args{linking};
 
-    my $file = "$ROOT/$args{target}/$args{target}.pm";
-    die "Couldn't find $file" unless -e $file;
-
     my $base = $args{target};
-    
-    # if the create script is newer than the .pm file redo the class
-    my $st_out = stat("$file");
-    my $st_in = stat("$CREATE");
-    
-    # otherwise check each class's files 
-    if ($st_in->mtime < $st_out->mtime) {
-      my @files;
-      # check the master column2name file
-      if (exists $args{controlled}) {
-	push(@files,"$ROOT/ControlledVocab/column2name");	  
-      } else {
-	push(@files,"$ROOT/$base/column2name");	  
-      }
-      # check any supporting column2name files
-      if (exists $args{support}) {
-	foreach (@{$args{support}}) {
-	  push(@files,"$ROOT/$_/column2name");	  
-	}      
-      }
-      # go through the files and see if any are more recent
-      foreach (@files) {
-	die "Couldn't find $_" unless -e $_;
-	$st_in = stat($_);
-	last if $st_in->mtime > $st_out->mtime;
-      }
-      
-      # skip this target if none of the files are more recent
+    my $dir = "$ROOT/$base";
+    my $file = "$dir/$base.pm";
+    die "Couldn't find $file" unless -d $dir;
+    if (-e $file) {
+
+      # if the create script is newer than the .pm file redo the class
+      my $st_out = stat("$file");
+      my $st_in = stat("$CREATE");
+
+      # otherwise check each class's files 
       if ($st_in->mtime < $st_out->mtime) {
-	print STDERR "Skipping $file (no change)\n" if $DEBUG; 
-	next TARGET;
+	my @files;
+	# check the master column2name file
+	if (exists $args{controlled}) {
+	  push(@files,"$ROOT/ControlledVocab/column2name");	  
+	} else {
+	  push(@files,"$ROOT/$base/column2name");	  
+	}
+	# check any supporting column2name files
+	if (exists $args{support}) {
+	  foreach (@{$args{support}}) {
+	    push(@files,"$ROOT/$_/column2name");	  
+	  }      
+	}
+	# go through the files and see if any are more recent
+	foreach (@files) {
+	  die "Couldn't find $_" unless -e $_;
+	  $st_in = stat($_);
+	  last if $st_in->mtime > $st_out->mtime;
+	}
+
+	# skip this target if none of the files are more recent
+	if ($st_in->mtime < $st_out->mtime) {
+	  print STDERR "Skipping $file (no change)\n" if $DEBUG; 
+	  next TARGET;
+	}
       }
     }
-  
+
     my $cmd = "$CREATE --dir=$ROOT --target=$base";
     foreach (@{$args{support}}) {
       $cmd .= " --support=$_";

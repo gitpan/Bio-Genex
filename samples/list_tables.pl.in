@@ -13,7 +13,7 @@ my $cgi_bin = '%%GENEX_URL_EXAMPLE%%';
 
 # ======= Start composing HTML page =====
 my $q = new CGI;
-print $q->header(), $q->start_html(-title => 'GeneX Database Query Form');
+print $q->header(), $q->start_html(-title => 'Browse the GeneX Database');
 
 # ===============  Get the params from the Web Page via CGI  ==============
 my $DEBUG = 0;

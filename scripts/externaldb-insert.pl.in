@@ -1,5 +1,5 @@
 %%START_PERL%%
-my $VERSION = '$Id: externaldb-insert.pl.in,v 1.4.2.1 2001/01/15 18:52:05 jes Exp $ ';
+my $VERSION = '$Id: externaldb-insert.pl.in,v 1.5 2001/01/24 06:01:07 jes Exp $ ';
 
 use strict;
 use blib;
@@ -10,7 +10,7 @@ use File::Basename;
 
 use XML::DOM;
 
-use Genex qw($SU_USERNAME $SU_PASSWORD);
+use Bio::Genex qw($SU_USERNAME $SU_PASSWORD);
 use Bio::Genex::DBUtils qw(create_insert_sql);
 use Bio::Genex::XMLUtils qw(assert_element);
 use Bio::Genex::ExternalDatabase;

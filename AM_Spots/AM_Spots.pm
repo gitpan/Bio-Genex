@@ -2,9 +2,9 @@
 #
 # Bio::Genex::AM_Spots
 #
-# created on Mon Jan 15 11:06:32 2001 by /home/jasons/work/GeneX-WWW-Installer/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-WWW-Installer/Genex --target=AM_Spots --support=SpotLink
+# created on Mon Feb  5 21:23:56 2001 by /home/jasons/work/GeneX-Server/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-Server/Genex --target=AM_Spots --support=SpotLink
 #
-# cvs id: $Id: AM_Spots.pm,v 1.9.2.1 2001/01/15 18:52:00 jes Exp $ 
+# cvs id: $Id: AM_Spots.pm,v 1.13 2001/02/06 18:58:51 jes Exp $ 
 #
 ##############################
 package Bio::Genex::AM_Spots;
@@ -22,13 +22,13 @@ use Bio::Genex::DBUtils qw(:CREATE
 use Bio::Genex qw(undefined);
 use Bio::Genex::Fkey qw(:FKEY);
 
-use ObjectTemplate 0.21;
+use Class::ObjectTemplate::DB 0.21;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $FKEYS $COLUMN2NAME $NAME2COLUMN $COLUMN_NAMES %_CACHE $USE_CACHE $LIMIT $FKEY_OBJ2RAW $TABLE2PKEY);
 
 require Exporter;
 
-@ISA = qw(ObjectTemplate Exporter);
+@ISA = qw(Class::ObjectTemplate::DB Exporter);
 
 # Items to export into callers namespace by default. Note: do not export
 # names by default without a very good reason. Use EXPORT_OK instead.
@@ -196,116 +196,119 @@ sub update_db {
   return 1;
 }
 #
-# a workhorse function for retrieving multiple objects of a class
+# a workhorse function for retrieving ALL objects of a class
 #
-sub get_objects {
+sub get_all_objects {
   my ($class) = shift;
   my @objects;
   my $COLUMN2FETCH;
   my $VALUE2FETCH;
   my $pkey_name;
   my $has_args = 0;
+  $pkey_name = $class->pkey_name();
   if (ref($_[0]) eq 'HASH') {
-    $has_args = 1;
     # we were called with an anonymous hash as the first parameter
     # grab it and parse the parameter => value pairs
     my $hashref = shift;
+    $has_args = 1;
     $COLUMN2FETCH =  $hashref->{column} if exists $hashref->{column};
     $VALUE2FETCH =  $hashref->{value} if exists $hashref->{value};
-    die "Bio::Genex::AM_Spots::get_objects: Must define both 'column' and 'value'" 
+    die "Bio::Genex::AM_Spots::get_all_objects: Must define both 'column' and 'value'" 
       if ((defined $VALUE2FETCH) && not (defined $COLUMN2FETCH)) || 
           ((defined $COLUMN2FETCH) && not (defined $VALUE2FETCH));
   }
-  $pkey_name = $class->pkey_name();
-  my @ids = @_;
-  if (scalar @ids == 0 && ! $has_args) {
-    croak("Bio::Genex::AM_Spots::get_objects called with no ID's
+
+  my @ids;
+
+  # using class methods seems indirect, but it deals
+  # properly with inheritance
+  my $FROM = [$class->table_name()];
+
+  # we fetch *all* columns, so that we can populate the new objects
+  my $COLUMNS = ['*'];
+
+  my $dbh = Bio::Genex::current_connection();
+  my @args = (COLUMNS=>$COLUMNS, FROM=>$FROM);
+  if (defined $COLUMN2FETCH) {
+    my $where =  "$COLUMN2FETCH = ". $dbh->quote($VALUE2FETCH);
+    push(@args,WHERE=>$where);
+  }
+  push(@args,LIMIT=>$LIMIT) if defined $LIMIT;
+  my $sql = create_select_sql($dbh,@args);
+  my $sth = $dbh->prepare($sql) 
+    or die "Bio::Genex::AM_Spots::get_all_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
+  $sth->execute() 
+    or die "Bio::Genex::AM_Spots::get_all_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
+
+  # if there were no objects, return. decide whether to return an 
+  # empty list or an empty arrayref using wantarray
+  unless ($sth->rows()) {
+    return () if wantarray;
+    return []; # if not wantarray
+  }
+
+  # we use the 'NAME' attribute of the statement handle to get the
+  # list of columns that were fetched.
+  my @column_names = @{$sth->{NAME}};
+  my $rows = $sth->fetchall_arrayref();
+  die "Bio::Genex::AM_Spots::get_all_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>" 
+    if $sth->err;
+  foreach my $col_ref (@{$rows}) {
+    # we create a blank object, and populate it with data ourselves
+    my $obj = $class->new();
+
+    # %fetched_attrs is used to track which attributes have
+    # already been retrieved from the DB, so that Bio::Genex::undefined
+    # doesn't try to fetch them a second time if their value is undef
+    my %fetched_attrs;
+    for (my $i=0;$i < scalar @column_names; $i++) {
+      no strict 'refs';
+      my $col = $column_names[$i];
+      $obj->$col($col_ref->[$i]);
+
+      # record the column as fetched
+      $fetched_attrs{$col}++;
+    }
+    # store the record of the fetched columns
+    $obj->fetched_attr(\%fetched_attrs);
+    $obj->fetched(1);
+
+    # now we set the id so that delayed-fetching will work for
+    # the OO attributes
+    $obj->id($obj->get_attribute("$pkey_name"));
+    push(@objects,$obj);
+  }
+  $sth->finish();
+
+  # decide whether to return a list or an arrayref using wantarray
+  return @objects if wantarray;
+  return \@objects; # if not wantarray
+}
+
+#
+# a workhorse function for retrieving multiple objects of a class
+#
+sub get_objects {
+  my ($class) = shift;
+  my @objects;
+  if (ref($_[0]) eq 'HASH' || scalar @_ == 0) {
+    croak("Bio::Genex::AM_Spots::get_objects called with no ID's, perhaps you meant to use Bio::Genex::AM_Spots::get_all_objects
 ");
-  } elsif (scalar @ids == 0 ||
-           (scalar @ids == 1 && $ids[0] eq 'ALL')) {
-    # the user is requesting all objects of type $class from the DB
+  } 
+  my @ids = @_;
+  my $obj;
+  foreach (@ids) {
+    if ($USE_CACHE && exists $_CACHE{$_}) {
+	$obj = $_CACHE{$_};	# use it if it's in the cache
+    } else {
+	my @args = (id=>$_);
+	$obj = $class->new(@args);
 
-    # empty the id list
-    @ids = ();
-
-
-    # using class methods seems indirect, but it deals
-    # properly with inheritance
-    my $FROM = [$class->table_name()];
-
-    # we fetch *all* columns, so that we can populate the new objects
-    my $COLUMNS = ['*'];
-  
-    my $dbh = Bio::Genex::current_connection();
-    my @args = (COLUMNS=>$COLUMNS, FROM=>$FROM);
-    if (defined $COLUMN2FETCH) {
-      my $where =  "$COLUMN2FETCH = ". $dbh->quote($VALUE2FETCH);
-      push(@args,WHERE=>$where);
+	# if the id was bad, $obj will be undefined
+	next unless defined $obj;
+	$_CACHE{$_} = $obj if $USE_CACHE; # stick it in the cache for later
     }
-    push(@args,LIMIT=>$LIMIT) if defined $LIMIT;
-    my $sql = create_select_sql($dbh,@args);
-    my $sth = $dbh->prepare($sql) 
-      or die "Bio::Genex::AM_Spots::get_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
-    $sth->execute() 
-      or die "Bio::Genex::AM_Spots::get_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
-
-    # if there were no objects, return. decide whether to return an 
-    # empty list or an empty arrayref using wantarray
-    unless ($sth->rows()) {
-      return () if wantarray;
-      return []; # if not wantarray
-    }
-
-    # we use the 'NAME' attribute of the statement handle to get the
-    # list of columns that were fetched.
-    my @column_names = @{$sth->{NAME}};
-    my $rows = $sth->fetchall_arrayref();
-    die "Bio::Genex::AM_Spots::get_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>" 
-      if $sth->err;
-    foreach my $col_ref (@{$rows}) {
-      # we create a blank object, and populate it with data ourselves
-      my $obj = $class->new();
-
-      # %fetched_attrs is used to track which attributes have
-      # already been retrieved from the DB, so that Bio::Genex::undefined
-      # doesn't try to fetch them a second time if their value is undef
-      my %fetched_attrs;
-      for (my $i=0;$i < scalar @column_names; $i++) {
-	no strict 'refs';
-	my $col = $column_names[$i];
-	$obj->$col($col_ref->[$i]);
-
-	# record the column as fetched
-	$fetched_attrs{$col}++;
-      }
-      # store the record of the fetched columns
-      $obj->fetched_attr(\%fetched_attrs);
-
-      # now we set the id so that delayed-fetching will work for
-      # the OO attributes
-      $obj->id($obj->get_attribute("$pkey_name"));
-      push(@objects,$obj);
-    }
-    $sth->finish();
-  } else {
-    # we have been called with an @id_list
-    die "Can't use 'column' and 'value' specifiers with an \@id_list"
-      if defined $COLUMN2FETCH || defined $VALUE2FETCH;
-
-    my $obj;
-    foreach (@ids) {
-      if ($USE_CACHE && exists $_CACHE{$_}) {
-  	$obj = $_CACHE{$_};	# use it if it's in the cache
-      } else {
-  	my @args = (id=>$_);
-  	$obj = $class->new(@args);
-  
-  	# if the id was bad, $obj will be undefined
-  	next unless defined $obj;
-  	$_CACHE{$_} = $obj if $USE_CACHE; # stick it in the cache for later
-      }
-      push(@objects, $obj);
-    }
+    push(@objects, $obj);
   }
   # decide whether to return a list or an arrayref using wantarray
   return @objects if wantarray;
@@ -498,7 +501,7 @@ Bio::Genex::AM_Spots - Methods for processing data from the GeneX DB
 
 
   # retrieving all instances from a table
-  my @objects = Bio::Genex::AM_Spots->get_objects('ALL');
+  my @objects = Bio::Genex::AM_Spots->get_all_objects();
 
   # retrieving the primary key for an object, generically
   my $primary_key = $AM_Spots->id();
@@ -774,7 +777,7 @@ B<NOTE:> Any modification of the primary key value will be discarded
 
 =item get_objects(@id_list)
 
-=item get_objects('ALL')
+=item get_all_objects()
 
 =item get_objects({column=>'col_name',value=>'val'})
 
@@ -789,8 +792,7 @@ B<WARNING>: Passing incorrect id values to C<get_objects()> will cause
 a warning from C<Bio::Genex::AM_Spots::initialize()>. Objects will be
 created for other correct id values in the list.
 
-By passing the 'ALL' parameter, C<get_objects()> returns an instance
-for every entry in the table.
+C<get_all_objects()> returns an instance for every entry in the table.
 
 By passing an anonymous hash reference that contains the 'column' and
 'name' keys, the method will return all objects from the DB whose that
@@ -994,8 +996,9 @@ risk.
 
 These classes are automatically generated by the
 create_genex_classes.pl script.  Each class is a subclass of the
-ObjectTemplate class (written by Sriram Srinivasan, described in
-I<Advanced Perl Programming>, and heavily modified by Jason
+Class::ObjectTemplate::DB class (which is in turn a subclass of
+Class::ObjectTemplate written by Sriram Srinivasan, described in
+I<Advanced Perl Programming>, and modified by Jason
 Stewart). ObjectTemplate implements automatic class creation in perl
 (there exist other options such as C<Class::Struct> and
 C<Class::MethodMaker> by Damian Conway) via an C<attributes()> method
@@ -1007,7 +1010,7 @@ Please send bug reports to genex@ncgr.org
 
 =head1 LAST UPDATED
 
-on Mon Jan 15 11:06:32 2001 by /home/jasons/work/GeneX-WWW-Installer/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-WWW-Installer/Genex --target=AM_Spots --support=SpotLink
+on Mon Feb  5 21:23:56 2001 by /home/jasons/work/GeneX-Server/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-Server/Genex --target=AM_Spots --support=SpotLink
 
 =head1 AUTHOR
 

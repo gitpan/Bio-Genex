@@ -2,9 +2,9 @@
 #
 # Bio::Genex::ExperimentSet
 #
-# created on Mon Jan 15 11:06:29 2001 by /home/jasons/work/GeneX-WWW-Installer/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-WWW-Installer/Genex --target=ExperimentSet --support=ArrayMeasurement --support=HotSpots --support=TreatmentLevel --support=CitationLink --support=ExperimentFactors
+# created on Mon Feb  5 21:23:53 2001 by /home/jasons/work/GeneX-Server/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-Server/Genex --target=ExperimentSet --support=ArrayMeasurement --support=HotSpots --support=TreatmentLevel --support=ExperimentFactors
 #
-# cvs id: $Id: ExperimentSet.pm,v 1.16.2.1 2001/01/15 18:52:01 jes Exp $ 
+# cvs id: $Id: ExperimentSet.pm,v 1.20 2001/02/06 18:58:52 jes Exp $ 
 #
 ##############################
 package Bio::Genex::ExperimentSet;
@@ -22,13 +22,13 @@ use Bio::Genex::DBUtils qw(:CREATE
 use Bio::Genex qw(undefined);
 use Bio::Genex::Fkey qw(:FKEY);
 
-use ObjectTemplate 0.21;
+use Class::ObjectTemplate::DB 0.21;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $FKEYS $COLUMN2NAME $NAME2COLUMN $COLUMN_NAMES %_CACHE $USE_CACHE $LIMIT $FKEY_OBJ2RAW $TABLE2PKEY);
 
 require Exporter;
 
-@ISA = qw(ObjectTemplate Exporter);
+@ISA = qw(Class::ObjectTemplate::DB Exporter);
 
 # Items to export into callers namespace by default. Note: do not export
 # names by default without a very good reason. Use EXPORT_OK instead.
@@ -46,6 +46,7 @@ BEGIN {
           'gs_fk',
           'us_fk',
           'cit_fk',
+          'provider_con_fk',
           'group_can_update',
           'biology_description',
           'analysis_description',
@@ -71,6 +72,12 @@ BEGIN {
                                             'fkey_name' => 'arraymeasurement_fk',
                                             'pkey_name' => 'primary_es_fk'
                                           }, 'Bio::Genex::Fkey' ),
+          'provider_con_obj' => bless( {
+                                         'table_name' => 'Contact',
+                                         'fkey_type' => 'FKEY_OO',
+                                         'fkey_name' => 'provider_con_obj',
+                                         'pkey_name' => 'con_pk'
+                                       }, 'Bio::Genex::Fkey' ),
           'gs_obj' => bless( {
                                'table_name' => 'GroupSec',
                                'fkey_type' => 'FKEY_OO',
@@ -101,18 +108,6 @@ BEGIN {
                                'fkey_name' => 'us_obj',
                                'pkey_name' => 'us_pk'
                              }, 'Bio::Genex::Fkey' ),
-          'citationlink_fk' => bless( {
-                                        'table_name' => 'CitationLink',
-                                        'fkey_type' => 'ONE_TO_MANY_LINK',
-                                        'fkey_name' => 'citationlink_fk',
-                                        'pkey_name' => 'es_fk'
-                                      }, 'Bio::Genex::Fkey' ),
-          'citationlink_obj' => bless( {
-                                         'fkey_type' => 'ONE_TO_MANY_LINK_OO',
-                                         'table_name' => 'CitationLink',
-                                         'fkey_name' => 'citationlink_obj',
-                                         'pkey_name' => 'es_fk'
-                                       }, 'Bio::Genex::Fkey' ),
           'cit_obj' => bless( {
                                 'table_name' => 'Citation',
                                 'fkey_type' => 'FKEY_OO',
@@ -144,6 +139,7 @@ BEGIN {
           'release_date' => 'Release Date',
           'analysis_description' => 'Analysis Description',
           'treatment_type' => 'Treatment Type',
+          'provider_con_fk' => 'Data Provider',
           'archive_bundle_ref' => 'Archive Bundle Reference',
           'gs_fk' => 'Group',
           'cit_fk' => 'Primary Citation',
@@ -173,24 +169,25 @@ BEGIN {
           'Local Accession Number' => 'local_accession',
           'Is Public' => 'is_public',
           'Owner' => 'us_fk',
-          'Primary Citation' => 'cit_fk'
+          'Primary Citation' => 'cit_fk',
+          'Data Provider' => 'provider_con_fk'
         }
 ;
   $FKEY_OBJ2RAW = {
+          'us_obj' => 'us_fk',
+          'provider_con_obj' => 'provider_con_fk',
           'gs_obj' => 'gs_fk',
           'treatmentlevel_obj' => 'treatmentlevel_fk',
-          'hotspots_obj' => 'hotspots_fk',
-          'us_obj' => 'us_fk',
-          'citationlink_obj' => 'citationlink_fk',
-          'experimentfactors_obj' => 'experimentfactors_fk',
           'cit_obj' => 'cit_fk',
-          'arraymeasurement_obj' => 'arraymeasurement_fk'
+          'experimentfactors_obj' => 'experimentfactors_fk',
+          'arraymeasurement_obj' => 'arraymeasurement_fk',
+          'hotspots_obj' => 'hotspots_fk'
         }
 ;
 }
 
 
-attributes (no_lookup=>['fetched', 'fetch_all', 'fetched_attr', 'id'], lookup=>['es_pk', 'name', 'gs_fk', 'us_fk', 'cit_fk', 'group_can_update', 'biology_description', 'analysis_description', 'treatment_type', 'quantity_series_type', 'is_public', 'release_date', 'submission_date', 'local_accession', 'archive_bundle_ref', 'gs_obj', 'us_obj', 'cit_obj', 'experimentfactors_obj', 'experimentfactors_fk', 'arraymeasurement_obj', 'arraymeasurement_fk', 'treatmentlevel_obj', 'treatmentlevel_fk', 'hotspots_obj', 'hotspots_fk', 'citationlink_obj', 'citationlink_fk']);
+attributes (no_lookup=>['fetched', 'fetch_all', 'fetched_attr', 'id'], lookup=>['es_pk', 'name', 'gs_fk', 'us_fk', 'cit_fk', 'provider_con_fk', 'group_can_update', 'biology_description', 'analysis_description', 'treatment_type', 'quantity_series_type', 'is_public', 'release_date', 'submission_date', 'local_accession', 'archive_bundle_ref', 'gs_obj', 'us_obj', 'cit_obj', 'provider_con_obj', 'experimentfactors_obj', 'experimentfactors_fk', 'arraymeasurement_obj', 'arraymeasurement_fk', 'treatmentlevel_obj', 'treatmentlevel_fk', 'hotspots_obj', 'hotspots_fk']);
 
 sub table_name {return 'ExperimentSet';} # probably unnecessary
 
@@ -288,116 +285,119 @@ sub update_db {
   return 1;
 }
 #
-# a workhorse function for retrieving multiple objects of a class
+# a workhorse function for retrieving ALL objects of a class
 #
-sub get_objects {
+sub get_all_objects {
   my ($class) = shift;
   my @objects;
   my $COLUMN2FETCH;
   my $VALUE2FETCH;
   my $pkey_name;
   my $has_args = 0;
+  $pkey_name = $class->pkey_name();
   if (ref($_[0]) eq 'HASH') {
-    $has_args = 1;
     # we were called with an anonymous hash as the first parameter
     # grab it and parse the parameter => value pairs
     my $hashref = shift;
+    $has_args = 1;
     $COLUMN2FETCH =  $hashref->{column} if exists $hashref->{column};
     $VALUE2FETCH =  $hashref->{value} if exists $hashref->{value};
-    die "Bio::Genex::ExperimentSet::get_objects: Must define both 'column' and 'value'" 
+    die "Bio::Genex::ExperimentSet::get_all_objects: Must define both 'column' and 'value'" 
       if ((defined $VALUE2FETCH) && not (defined $COLUMN2FETCH)) || 
           ((defined $COLUMN2FETCH) && not (defined $VALUE2FETCH));
   }
-  $pkey_name = $class->pkey_name();
-  my @ids = @_;
-  if (scalar @ids == 0 && ! $has_args) {
-    croak("Bio::Genex::ExperimentSet::get_objects called with no ID's
+
+  my @ids;
+
+  # using class methods seems indirect, but it deals
+  # properly with inheritance
+  my $FROM = [$class->table_name()];
+
+  # we fetch *all* columns, so that we can populate the new objects
+  my $COLUMNS = ['*'];
+
+  my $dbh = Bio::Genex::current_connection();
+  my @args = (COLUMNS=>$COLUMNS, FROM=>$FROM);
+  if (defined $COLUMN2FETCH) {
+    my $where =  "$COLUMN2FETCH = ". $dbh->quote($VALUE2FETCH);
+    push(@args,WHERE=>$where);
+  }
+  push(@args,LIMIT=>$LIMIT) if defined $LIMIT;
+  my $sql = create_select_sql($dbh,@args);
+  my $sth = $dbh->prepare($sql) 
+    or die "Bio::Genex::ExperimentSet::get_all_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
+  $sth->execute() 
+    or die "Bio::Genex::ExperimentSet::get_all_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
+
+  # if there were no objects, return. decide whether to return an 
+  # empty list or an empty arrayref using wantarray
+  unless ($sth->rows()) {
+    return () if wantarray;
+    return []; # if not wantarray
+  }
+
+  # we use the 'NAME' attribute of the statement handle to get the
+  # list of columns that were fetched.
+  my @column_names = @{$sth->{NAME}};
+  my $rows = $sth->fetchall_arrayref();
+  die "Bio::Genex::ExperimentSet::get_all_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>" 
+    if $sth->err;
+  foreach my $col_ref (@{$rows}) {
+    # we create a blank object, and populate it with data ourselves
+    my $obj = $class->new();
+
+    # %fetched_attrs is used to track which attributes have
+    # already been retrieved from the DB, so that Bio::Genex::undefined
+    # doesn't try to fetch them a second time if their value is undef
+    my %fetched_attrs;
+    for (my $i=0;$i < scalar @column_names; $i++) {
+      no strict 'refs';
+      my $col = $column_names[$i];
+      $obj->$col($col_ref->[$i]);
+
+      # record the column as fetched
+      $fetched_attrs{$col}++;
+    }
+    # store the record of the fetched columns
+    $obj->fetched_attr(\%fetched_attrs);
+    $obj->fetched(1);
+
+    # now we set the id so that delayed-fetching will work for
+    # the OO attributes
+    $obj->id($obj->get_attribute("$pkey_name"));
+    push(@objects,$obj);
+  }
+  $sth->finish();
+
+  # decide whether to return a list or an arrayref using wantarray
+  return @objects if wantarray;
+  return \@objects; # if not wantarray
+}
+
+#
+# a workhorse function for retrieving multiple objects of a class
+#
+sub get_objects {
+  my ($class) = shift;
+  my @objects;
+  if (ref($_[0]) eq 'HASH' || scalar @_ == 0) {
+    croak("Bio::Genex::ExperimentSet::get_objects called with no ID's, perhaps you meant to use Bio::Genex::ExperimentSet::get_all_objects
 ");
-  } elsif (scalar @ids == 0 ||
-           (scalar @ids == 1 && $ids[0] eq 'ALL')) {
-    # the user is requesting all objects of type $class from the DB
+  } 
+  my @ids = @_;
+  my $obj;
+  foreach (@ids) {
+    if ($USE_CACHE && exists $_CACHE{$_}) {
+	$obj = $_CACHE{$_};	# use it if it's in the cache
+    } else {
+	my @args = (id=>$_);
+	$obj = $class->new(@args);
 
-    # empty the id list
-    @ids = ();
-
-
-    # using class methods seems indirect, but it deals
-    # properly with inheritance
-    my $FROM = [$class->table_name()];
-
-    # we fetch *all* columns, so that we can populate the new objects
-    my $COLUMNS = ['*'];
-  
-    my $dbh = Bio::Genex::current_connection();
-    my @args = (COLUMNS=>$COLUMNS, FROM=>$FROM);
-    if (defined $COLUMN2FETCH) {
-      my $where =  "$COLUMN2FETCH = ". $dbh->quote($VALUE2FETCH);
-      push(@args,WHERE=>$where);
+	# if the id was bad, $obj will be undefined
+	next unless defined $obj;
+	$_CACHE{$_} = $obj if $USE_CACHE; # stick it in the cache for later
     }
-    push(@args,LIMIT=>$LIMIT) if defined $LIMIT;
-    my $sql = create_select_sql($dbh,@args);
-    my $sth = $dbh->prepare($sql) 
-      or die "Bio::Genex::ExperimentSet::get_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
-    $sth->execute() 
-      or die "Bio::Genex::ExperimentSet::get_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
-
-    # if there were no objects, return. decide whether to return an 
-    # empty list or an empty arrayref using wantarray
-    unless ($sth->rows()) {
-      return () if wantarray;
-      return []; # if not wantarray
-    }
-
-    # we use the 'NAME' attribute of the statement handle to get the
-    # list of columns that were fetched.
-    my @column_names = @{$sth->{NAME}};
-    my $rows = $sth->fetchall_arrayref();
-    die "Bio::Genex::ExperimentSet::get_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>" 
-      if $sth->err;
-    foreach my $col_ref (@{$rows}) {
-      # we create a blank object, and populate it with data ourselves
-      my $obj = $class->new();
-
-      # %fetched_attrs is used to track which attributes have
-      # already been retrieved from the DB, so that Bio::Genex::undefined
-      # doesn't try to fetch them a second time if their value is undef
-      my %fetched_attrs;
-      for (my $i=0;$i < scalar @column_names; $i++) {
-	no strict 'refs';
-	my $col = $column_names[$i];
-	$obj->$col($col_ref->[$i]);
-
-	# record the column as fetched
-	$fetched_attrs{$col}++;
-      }
-      # store the record of the fetched columns
-      $obj->fetched_attr(\%fetched_attrs);
-
-      # now we set the id so that delayed-fetching will work for
-      # the OO attributes
-      $obj->id($obj->get_attribute("$pkey_name"));
-      push(@objects,$obj);
-    }
-    $sth->finish();
-  } else {
-    # we have been called with an @id_list
-    die "Can't use 'column' and 'value' specifiers with an \@id_list"
-      if defined $COLUMN2FETCH || defined $VALUE2FETCH;
-
-    my $obj;
-    foreach (@ids) {
-      if ($USE_CACHE && exists $_CACHE{$_}) {
-  	$obj = $_CACHE{$_};	# use it if it's in the cache
-      } else {
-  	my @args = (id=>$_);
-  	$obj = $class->new(@args);
-  
-  	# if the id was bad, $obj will be undefined
-  	next unless defined $obj;
-  	$_CACHE{$_} = $obj if $USE_CACHE; # stick it in the cache for later
-      }
-      push(@objects, $obj);
-    }
+    push(@objects, $obj);
   }
   # decide whether to return a list or an arrayref using wantarray
   return @objects if wantarray;
@@ -478,7 +478,7 @@ sub fetch {
   # for the purpose of inheritance
   assert_table_defined($dbh,$self->table_name());
   my $sql = create_select_sql($dbh,
-                    COLUMNS=>['es_pk', 'name', 'gs_fk', 'us_fk', 'cit_fk', 'group_can_update', 'biology_description', 'analysis_description', 'treatment_type', 'quantity_series_type', 'is_public', 'release_date', 'submission_date', 'local_accession', 'archive_bundle_ref'],
+                    COLUMNS=>['es_pk', 'name', 'gs_fk', 'us_fk', 'cit_fk', 'provider_con_fk', 'group_can_update', 'biology_description', 'analysis_description', 'treatment_type', 'quantity_series_type', 'is_public', 'release_date', 'submission_date', 'local_accession', 'archive_bundle_ref'],
                     FROM=>[$self->table_name()],
                     WHERE=>$self->pkey_name() . " = '$pkey'",
                               );
@@ -536,7 +536,7 @@ Bio::Genex::ExperimentSet - Methods for processing data from the GeneX DB
 
 
   # retrieving all instances from a table
-  my @objects = Bio::Genex::ExperimentSet->get_objects('ALL');
+  my @objects = Bio::Genex::ExperimentSet->get_all_objects();
 
   # retrieving the primary key for an object, generically
   my $primary_key = $ExperimentSet->id();
@@ -556,6 +556,9 @@ Bio::Genex::ExperimentSet - Methods for processing data from the GeneX DB
 
   my $cit_fk_val = $ExperimentSet->cit_fk();
   $ExperimentSet->cit_fk($value);
+
+  my $provider_con_fk_val = $ExperimentSet->provider_con_fk();
+  $ExperimentSet->provider_con_fk($value);
 
   my $group_can_update_val = $ExperimentSet->group_can_update();
   $ExperimentSet->group_can_update($value);
@@ -826,7 +829,7 @@ B<NOTE:> Any modification of the primary key value will be discarded
 
 =item get_objects(@id_list)
 
-=item get_objects('ALL')
+=item get_all_objects()
 
 =item get_objects({column=>'col_name',value=>'val'})
 
@@ -841,8 +844,7 @@ B<WARNING>: Passing incorrect id values to C<get_objects()> will cause
 a warning from C<Bio::Genex::ExperimentSet::initialize()>. Objects will be
 created for other correct id values in the list.
 
-By passing the 'ALL' parameter, C<get_objects()> returns an instance
-for every entry in the table.
+C<get_all_objects()> returns an instance for every entry in the table.
 
 By passing an anonymous hash reference that contains the 'column' and
 'name' keys, the method will return all objects from the DB whose that
@@ -948,16 +950,6 @@ This is an attribute of type ONE_TO_MANY and refers to class
 L<Bio::Genex::TreatmentLevel>. The raw accessor method, C<treatmentlevel_fk()> returns a list of
 foreign key ids. The OO accessor method, C<treatmentlevel_obj()> returns a
 list of objects of class Bio::Genex::TreatmentLevel.
-
-
-=item @id_list = citationlink_fk()
-
-=item @obj_list = citationlink_obj()
-
-This is an attribute of type ONE_TO_MANY_LINK and refers to class
-L<Bio::Genex::CitationLink>. The raw accessor method, C<citationlink_fk()> returns a list of
-foreign key ids. The OO accessor method, C<citationlink_obj()> returns a
-list of objects of class Bio::Genex::CitationLink.
 
 
 =back
@@ -1081,6 +1073,13 @@ Methods for the us_fk attribute.
 Methods for the cit_fk attribute.
 
 
+=item $value = provider_con_fk();
+
+=item provider_con_fk($value);
+
+Methods for the provider_con_fk attribute.
+
+
 =item $value = group_can_update();
 
 =item group_can_update($value);
@@ -1163,8 +1162,9 @@ risk.
 
 These classes are automatically generated by the
 create_genex_classes.pl script.  Each class is a subclass of the
-ObjectTemplate class (written by Sriram Srinivasan, described in
-I<Advanced Perl Programming>, and heavily modified by Jason
+Class::ObjectTemplate::DB class (which is in turn a subclass of
+Class::ObjectTemplate written by Sriram Srinivasan, described in
+I<Advanced Perl Programming>, and modified by Jason
 Stewart). ObjectTemplate implements automatic class creation in perl
 (there exist other options such as C<Class::Struct> and
 C<Class::MethodMaker> by Damian Conway) via an C<attributes()> method
@@ -1176,7 +1176,7 @@ Please send bug reports to genex@ncgr.org
 
 =head1 LAST UPDATED
 
-on Mon Jan 15 11:06:29 2001 by /home/jasons/work/GeneX-WWW-Installer/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-WWW-Installer/Genex --target=ExperimentSet --support=ArrayMeasurement --support=HotSpots --support=TreatmentLevel --support=CitationLink --support=ExperimentFactors
+on Mon Feb  5 21:23:53 2001 by /home/jasons/work/GeneX-Server/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-Server/Genex --target=ExperimentSet --support=ArrayMeasurement --support=HotSpots --support=TreatmentLevel --support=ExperimentFactors
 
 =head1 AUTHOR
 

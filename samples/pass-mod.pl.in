@@ -10,7 +10,6 @@
 # script copyright (c) 2000 by NCGR.
 # All rights reserved.
 
-use POSIX 'strftime';
 use strict;
 use CGI qw(:standard :html3 :netscape);
 
@@ -187,7 +186,7 @@ Please send bug reports to genex@ncgr.org
 
 =head1 LAST UPDATED
 
-$Date: 2001/01/15 18:52:04 $ by jes@ncgr.org
+$Date: 2001/02/05 16:34:24 $ by jes@ncgr.org
 
 =head1 AUTHOR
 

@@ -87,6 +87,9 @@
   my $gs_fk_val = $ArrayMeasurement-&gt;gs_fk();
   $ArrayMeasurement-&gt;gs_fk($value);</PRE>
 <PRE>
+  my $provider_con_fk_val = $ArrayMeasurement-&gt;provider_con_fk();
+  $ArrayMeasurement-&gt;provider_con_fk($value);</PRE>
+<PRE>
   my $hybridization_name_val = $ArrayMeasurement-&gt;hybridization_name();
   $ArrayMeasurement-&gt;hybridization_name($value);</PRE>
 <PRE>
@@ -212,14 +215,14 @@ created.</P>
 <P>Class Bio::Genex::ArrayMeasurement defines the following utility variables for assisting
 programmers to access the ArrayMeasurement table.</P>
 <DL>
-<DT><STRONG><A NAME="item_%24Genex%3A%3AArrayMeasurement%3A%3ALIMIT">$Bio::Genex::ArrayMeasurement::LIMIT</A></STRONG><BR>
+<DT><STRONG><A NAME="item_%24Bio%3A%3AGenex%3A%3AArrayMeasurement%3A%3ALIMIT">$Bio::Genex::ArrayMeasurement::LIMIT</A></STRONG><BR>
 <DD>
 If defined, $LIMIT will set a limit on any select statements that can
 return multiple instances of this class (for example <A HREF="#item_get_objects"><CODE>get_objects()</CODE></A>
 or any call to a <CODE>ONE_TO_MANY</CODE> or <CODE>LOOKUP_TABLE</CODE> foreign key
 accessor method).
 <P></P>
-<DT><STRONG><A NAME="item_%24Genex%3A%3AArrayMeasurement%3A%3AUSE_CACHE">$Bio::Genex::ArrayMeasurement::USE_CACHE</A></STRONG><BR>
+<DT><STRONG><A NAME="item_%24Bio%3A%3AGenex%3A%3AArrayMeasurement%3A%3AUSE_C">$Bio::Genex::ArrayMeasurement::USE_CACHE</A></STRONG><BR>
 <DD>
 This variable controls whether the class will cache any objects
 created in calls to <A HREF="#item_new"><CODE>new()</CODE></A>. Objects are cached by primary key. The
@@ -433,7 +436,7 @@ Bio::Genex::ArrayMeasurement:</P>
 <DT><STRONG><A NAME="item_treatment_ams_obj">@obj_list = <CODE>treatment_ams_obj()</CODE></A></STRONG><BR>
 <DD>
 This is an attribute of type ONE_TO_MANY_LINK and refers to class
-<A HREF="/home/jasons/Genex/html/Genex/Treatment_AMs.html">the Bio::Genex::Treatment_AMs manpage</A>. The raw accessor method, <A HREF="#item_treatment_ams_fk"><CODE>treatment_ams_fk()</CODE></A> returns a list of
+<A HREF="/home/jasons/work/GeneX-WWW-Installer/Genex/html/Bio/Genex/Treatment_AMs.html">the Bio::Genex::Treatment_AMs manpage</A>. The raw accessor method, <A HREF="#item_treatment_ams_fk"><CODE>treatment_ams_fk()</CODE></A> returns a list of
 foreign key ids. The OO accessor method, <A HREF="#item_treatment_ams_obj"><CODE>treatment_ams_obj()</CODE></A> returns a
 list of objects of class Bio::Genex::Treatment_AMs.
 <P></P>
@@ -442,7 +445,7 @@ list of objects of class Bio::Genex::Treatment_AMs.
 <DT><STRONG><A NAME="item_am_spots_obj">@obj_list = <CODE>am_spots_obj()</CODE></A></STRONG><BR>
 <DD>
 This is an attribute of type ONE_TO_MANY_LT and refers to class
-<A HREF="/home/jasons/Genex/html/Genex/AM_Spots.html">the Bio::Genex::AM_Spots manpage</A>. The raw accessor method, <A HREF="#item_am_spots_fk"><CODE>am_spots_fk()</CODE></A> returns a list of
+<A HREF="/home/jasons/work/GeneX-WWW-Installer/Genex/html/Bio/Genex/AM_Spots.html">the Bio::Genex::AM_Spots manpage</A>. The raw accessor method, <A HREF="#item_am_spots_fk"><CODE>am_spots_fk()</CODE></A> returns a list of
 foreign key ids. The OO accessor method, <A HREF="#item_am_spots_obj"><CODE>am_spots_obj()</CODE></A> returns a
 list of objects of class Bio::Genex::AM_Spots.
 <P></P>
@@ -451,7 +454,7 @@ list of objects of class Bio::Genex::AM_Spots.
 <DT><STRONG><A NAME="item_am_factorvalues_obj">@obj_list = <CODE>am_factorvalues_obj()</CODE></A></STRONG><BR>
 <DD>
 This is an attribute of type ONE_TO_MANY_LINK and refers to class
-<A HREF="/home/jasons/Genex/html/Genex/AM_FactorValues.html">the Bio::Genex::AM_FactorValues manpage</A>. The raw accessor method, <A HREF="#item_am_factorvalues_fk"><CODE>am_factorvalues_fk()</CODE></A> returns a list of
+<A HREF="/home/jasons/work/GeneX-WWW-Installer/Genex/html/Bio/Genex/AM_FactorValues.html">the Bio::Genex::AM_FactorValues manpage</A>. The raw accessor method, <A HREF="#item_am_factorvalues_fk"><CODE>am_factorvalues_fk()</CODE></A> returns a list of
 foreign key ids. The OO accessor method, <A HREF="#item_am_factorvalues_obj"><CODE>am_factorvalues_obj()</CODE></A> returns a
 list of objects of class Bio::Genex::AM_FactorValues.
 <P></P></DL>
@@ -465,12 +468,12 @@ MANY_TO_ONE
 to the API of that class, but instead it confers a special method to
 the class that it references.</P>
 <P>For example, the Chromosome table has a MANY_TO_ONE foreign key,
-spc_fk, that refers to the species table. Class <A HREF="/home/jasons/Genex/html/Genex/Chromosome.html">the Bio::Genex::Chromosome manpage</A>, has
+spc_fk, that refers to the species table. Class <A HREF="/home/jasons/work/GeneX-WWW-Installer/Genex/html/Bio/Genex/Chromosome.html">the Bio::Genex::Chromosome manpage</A>, has
 it\'s normal <CODE>spc_fk()</CODE> attribute method, but no special foreign key
-accessor method. However, class <A HREF="/home/jasons/Genex/html/Genex/Species.html">the Bio::Genex::Species manpage</A> is given a special
+accessor method. However, class <A HREF="/home/jasons/work/GeneX-WWW-Installer/Genex/html/Bio/Genex/Species.html">the Bio::Genex::Species manpage</A> is given a special
 foreign key accessor method, <CODE>chromosome_fk()</CODE> of type
 ONE_TO_MANY. When invoked, this method returns a list of objects of
-class <A HREF="/home/jasons/Genex/html/Genex/Species.html">the Bio::Genex::Species manpage</A>.</P>
+class <A HREF="/home/jasons/work/GeneX-WWW-Installer/Genex/html/Bio/Genex/Species.html">the Bio::Genex::Species manpage</A>.</P>
 <P></P>
 <LI>
 ONE_TO_MANY
@@ -484,8 +487,8 @@ LOOKUP_TABLE
 <P>This type of key is similar to type ONE_TO_MANY. However, However the
 API will <EM>never</EM> retrieve an object of this type. Instead it
 retrieves a matrix of values, that represent the list of objects. It
-is used in only two places in the API: <A HREF="/home/jasons/Genex/html/Genex/ArrayMeasurement.html">the Bio::Genex::ArrayMeasurement manpage</A> and
-<A HREF="/home/jasons/Genex/html/Genex/ArrayLayout.html">the Bio::Genex::ArrayLayout manpage</A> classes with the <CODE>am_spots()</CODE> and <CODE>al_spots()</CODE>
+is used in only two places in the API: <A HREF="/home/jasons/work/GeneX-WWW-Installer/Genex/html/Bio/Genex/ArrayMeasurement.html">the Bio::Genex::ArrayMeasurement manpage</A> and
+<A HREF="/home/jasons/work/GeneX-WWW-Installer/Genex/html/Bio/Genex/ArrayLayout.html">the Bio::Genex::ArrayLayout manpage</A> classes with the <CODE>am_spots()</CODE> and <CODE>al_spots()</CODE>
 accessor functions.</P>
 <P></P>
 <LI>
@@ -563,6 +566,12 @@ Methods for the us_fk attribute.
 <DT><STRONG>gs_fk($value);</STRONG><BR>
 <DD>
 Methods for the gs_fk attribute.
+<P></P>
+<DT><STRONG><A NAME="item_provider_con_fk">$value = provider_con_fk();</A></STRONG><BR>
+<DD>
+<DT><STRONG>provider_con_fk($value);</STRONG><BR>
+<DD>
+Methods for the provider_con_fk attribute.
 <P></P>
 <DT><STRONG><A NAME="item_hybridization_name">$value = hybridization_name();</A></STRONG><BR>
 <DD>
@@ -722,8 +731,9 @@ risk.</P>
 <H1><A NAME="implementation details">IMPLEMENTATION DETAILS</A></H1>
 <P>These classes are automatically generated by the
 create_genex_classes.pl script.  Each class is a subclass of the
-ObjectTemplate class (written by Sriram Srinivasan, described in
-<EM>Advanced Perl Programming</EM>, and heavily modified by Jason
+Class::ObjectTemplate::DB class (which is in turn a subclass of
+Class::ObjectTemplate written by Sriram Srinivasan, described in
+<EM>Advanced Perl Programming</EM>, and modified by Jason
 Stewart). ObjectTemplate implements automatic class creation in perl
 (there exist other options such as <CODE>Class::Struct</CODE> and
 <CODE>Class::MethodMaker</CODE> by Damian Conway) via an <CODE>attributes()</CODE> method
@@ -735,7 +745,7 @@ call at class creation time.</P>
 <P>
 <HR>
 <H1><A NAME="last updated">LAST UPDATED</A></H1>
-<P>on Thu Dec  7 18:35:40 2000 by /home/jasons/Genex/scripts/create_genex_class.pl --target=ArrayMeasurement --support=AM_Spots --support=AM_FactorValues --support=Treatment_AMs</P>
+<P>on Tue Jan 23 22:53:39 2001 by /home/jasons/work/GeneX-WWW-Installer/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-WWW-Installer/Genex --target=ArrayMeasurement --support=AM_Spots --support=AM_FactorValues --support=Treatment_AMs</P>
 <P>
 <HR>
 <H1><A NAME="author">AUTHOR</A></H1>

@@ -1,24 +1,10 @@
 use ExtUtils::MakeMaker qw(WriteMakefile);
 use Getopt::Long;
 
-eval "use Data::Dumper";
-if ($@) {
-  print STDERR <<'EOE';
-You do not have the Data::Dumper module installed, which is
-required for building this package. Missing modules are available
-from any CPAN mirror, for example
-
-   ftp://ftp.funet.fi/pub/languages/perl/CPAN/modules/by-module
-
-EOE
-
-  exit 1;
-}
-
 # First we check if this is a local install
 print STDERR "Loading Config.pm\n";
 
-if (-f 'Config.pm') {
+if (-f '../Bio/Genex/Config.pm') {
   # configure.pl has already been run, we just load Config.pm
   eval {
     use lib '..';
@@ -87,18 +73,33 @@ $GENEX_INSTALLSITE = $Bio::Genex::Config->{'GENEX_INSTALLSITE'};
 my $PM = {'Genex.pm' => '$(INST_LIBDIR)/Genex.pm',
 	 };
 
-print STDERR "EXAMPLE_DIR undefined!!!!\n" unless defined $EXAMPLE_DIR;
-print STDERR "MAN3_DIR undefined!!!!\n" unless defined $GENEX_MAN3;
-print STDERR "MAN1_DIR undefined!!!!\n" unless defined $GENEX_MAN1;
-print STDERR "INSTALLSITELIB undefined!!!!\n" unless defined $GENEX_INSTALLSITE;
+print STDERR "EXAMPLE_DIR undefined!!!!\n" 
+  unless defined $EXAMPLE_DIR;
+print STDERR "MAN3_DIR undefined!!!!\n" 
+  unless defined $GENEX_MAN3;
+print STDERR "MAN1_DIR undefined!!!!\n" 
+  unless defined $GENEX_MAN1;
+print STDERR "INSTALLSITELIB undefined!!!!\n" 
+  unless defined $GENEX_INSTALLSITE;
 
-WriteMakefile(
+print STDOUT <<"EOM";
+Using the following installation parameters from Genex::Config:
+
     'INSTALLSITELIB' => $GENEX_INSTALLSITE,
     'INSTALLMAN1DIR' => $GENEX_MAN1,
     'INSTALLMAN3DIR' => $GENEX_MAN3,
-    'PM' => $PM,
-    'NAME'	=> 'Bio::Genex',
-    'VERSION_FROM' => 'Genex.pm.in',
+
+EOM
+
+WriteMakefile(
+    INSTALLSITELIB => $GENEX_INSTALLSITE,
+    INSTALLMAN1DIR => $GENEX_MAN1,
+    INSTALLMAN3DIR => $GENEX_MAN3,
+    PM             => $PM,
+    NAME	   => 'Bio::Genex',
+    VERSION_FROM   => 'Genex.pm.in',
+    PREREQ_PM      => { 'Class::ObjectTemplate::DB' => '0.22',
+		      }
 );
 
 sub libscan {

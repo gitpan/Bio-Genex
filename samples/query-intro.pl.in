@@ -1,7 +1,6 @@
 %%START_PERL%%
 
 use Carp;
-use POSIX 'strftime';
 use strict;
 
 %%GENEX_EXTRALIBS%%

@@ -3,7 +3,6 @@
 use Carp;
 use CGI qw(:standard :html3);
 use CGI::Carp qw(fatalsToBrowser);
-use POSIX 'strftime';
 use DBI;
 use Bio::Genex;
 %%GENEX_EXTRALIBS%%

@@ -1,5 +1,69 @@
 Revision history for Perl extension Genex.
 
+2.6.0 Tue Feb  6 15:48:00 MST 2001
+      - XMLUtils.pm:
+        Added the beginings of a real XML API, defining db2xml() and
+	   all2xml() for some classes
+	Now defines Bio::Genex::GeneXML and ::GeneXML::USF helper
+	   classes 
+	Fixed pretty_print() to preserve whitespace
+      - DBUtils.pm:
+        now has many more assert_* methods
+        new helper method: fetch_db_ids_for_species() that does a
+	   join accross the USF, and ExternalDatabase tables
+      - Genex.pm:
+        now has timestamp() helper method, so that all DB timestamps
+	   can be formatted identically
+      - GenexAdmin.pm:
+        Class interface to new table. This enables a DB history
+	mechanism to record changes to the DB installation
+      - get_objects() fixed for all classes
+      - db2xml.pl: 
+        fixed a BlastHits bug
+	added pretty_print() again
+	Fixed caching of control bundles, so that the <misc_list> is 
+	   specific to each download
+      - cv-insert.pl:
+        now records info into GenexAdmin
+        now uses --name option to identify *who* made the changes
+	uses --dbname to specify what DB to use
+      - status.pl:
+        New CGI script that shows all version information pertinent to
+	   the server installation. 
+
+2.5.0 Fri Jan 26 02:38:59 MST 2001
+      - db2xml.pl:
+        caching of experiment sets and control-bunldes implemented
+        now has --no_cache option to avoid using or setting cache
+	--user/--password now optional unless --authenticate is specified
+	Removed citationlink()
+	Fixed aweful citation bug that never showed up, because
+	   citationlink table was never populated
+      - Fixed API for get_objects() by creating new method
+	   get_all_objects().
+      - fixed bug in check_password()
+      - XMLUtils.pm.in
+	Added new framework for implementing class-specific XML output. 
+	Implemented output for Chromosome, and partial output for Species
+	   (still needs USF for completeness).
+      - DBUtils.pm.in (Repository): 
+	Added new assert_* methods: 
+	   assert_species
+	   assert_protocol
+	   assert_scanner
+	   assert_software
+	   assert_spotter
+	   assert_array
+	   assert_experiment
+	check_password() no longer dies() with a bad password, instead it
+	   returns undef
+      - UserSequenceFeature, ExperimentSet and ArrayMeasurement now have
+           provider_con_fk() and  provider_con_obj() methods
+	post_process() no longer automatically derefences the con_obj()
+	   from a us_obj, it first tests the definedness
+      - ExternalDatabase: Fixed full name
+      - list_tables.pl.in: Fixed name of HTML title
+
 2.4.0 Tue Jan 16 09:50:56 MST 2001
       - Changed to Bio::Genex namespace
       - Now gets INSTALLSITELIB, INSTALLMAN1DIR, and INSTALLMAN3DIR from

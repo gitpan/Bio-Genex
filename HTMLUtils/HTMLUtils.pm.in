@@ -134,7 +134,7 @@ sub post_process {
   foreach (keys %args) {
     # get around the ugly HTML table default
     my $space = '&nbsp;';
-    $args{$_} = $space unless defined $args{$_} && $args{$_};
+    $args{$_} = $space unless defined $args{$_} && $args{$_} !~ m/^\s*$/;
 
     if (/^login$/ || /^password$/) {
       # we do not show login names or passwords
@@ -170,12 +170,9 @@ sub post_process {
 		  image_anal_sw_fk|
 		  spotter_sw_fk|
 		  scan_sw_fk|
-		  csf1_csf_fk|
-		  csf2_csf_fk|
-		  csf_fk|
-		  putative_csf_fk|
 		  ratio_am_fk|
 		  con_fk|
+		  provider_con_fk|
 		  prt_fk|
 		  ef_fk|
 		  tl_fk|
@@ -198,7 +195,7 @@ sub post_process {
     # now postprocess the key
     my ($text,$table);
     my $error = 0;
-    if (/con_fk/) {
+    if (/con_fk$/) {
       $table = 'Contact';
       my $class = 'Bio::Genex::' . $table;
       eval "require $class";
@@ -208,7 +205,7 @@ sub post_process {
 	$error = 1;
 	goto ERROR;
       }
-      my $text =  $contact->contact_person();
+      $text =  $contact->contact_person();
       # Use the organization if no contact person is specified
       $text =  $contact->organization() unless defined $text;
     } elsif (/^(owner_us_fk|us_fk)$/) {
@@ -223,7 +220,11 @@ sub post_process {
 	$error = 1;
 	goto ERROR;
       }
-      $text = $user->con_obj->contact_person();
+      if (defined $user->con_obj && $user->con_obj->isa('Genex::Contact')) {
+	$text = $user->con_obj->contact_person();
+      } else {
+	$text = 'Not Available';
+      }
     } elsif (/spc_fk/) {
       $table = 'Species';
       my $class = 'Bio::Genex::' . $table;
@@ -385,17 +386,6 @@ sub post_process {
 	goto ERROR;
       }
       $text = $prt_db->title();
-    } elsif (/^(csf1_csf_fk|csf2_csf_fk|csf_fk|putative_csf_fk)$/) {
-      $table = 'CanonicalSequenceSequenceFeature';
-      my $class = 'Bio::Genex::' . $table;
-      eval "require $class";
-      die "$@" if $@;
-      my $csf_db = $class->new(id=>$pkey);
-      unless (defined $csf_db) {
-	$error = 1;
-	goto ERROR;
-      }
-      $text = $csf_db->csf_name();
     } elsif (/gs_fk/) {
       $table = 'GroupSec';
       my $class = 'Bio::Genex::' . $table;

@@ -10,13 +10,24 @@ my $st_config;
 
 # first we check if we are being run as part of a complete GeneX
 # install, or only as an update to Genex.pm
-if (-e "Bio/Genex/$CONFIG_FILE_NAME") {
-  $st_config = stat("Genex/$CONFIG_FILE_NAME");
+if (cwd() ne 'scripts' && -e "Bio/Genex/$CONFIG_FILE_NAME") {
+  $st_config = stat("Bio/Genex/$CONFIG_FILE_NAME");
 
   # nice trick. we wrote the hash out as a perl module using Data:Dumper,
   # so to recreate it we just 'require' it ;-)
   eval {
     use lib '.';
+    require Bio::Genex::Config;
+  };
+  die "$0: Couldn't load local Config.pm: $@\n"
+    if $@;
+} elsif (-e "../Bio/Genex/$CONFIG_FILE_NAME") {
+  $st_config = stat("../Bio/Genex/$CONFIG_FILE_NAME");
+
+  # nice trick. we wrote the hash out as a perl module using Data:Dumper,
+  # so to recreate it we just 'require' it ;-)
+  eval {
+    use lib '..';
     require Bio::Genex::Config;
   };
   die "$0: Couldn't load local Config.pm: $@\n"
@@ -98,7 +109,7 @@ sub wanted {
 
     # First, if the config file is local, check if the config more
     # recent, otherwise check if infile is more recent
-    if (!defined $st_config || $st_config->mtime > $st_out->mtime) {
+    if (!defined $st_config || $st_config->mtime < $st_out->mtime) {
       # has the infile been modified?
       return unless $st_in->mtime > $st_out->mtime;
     }
@@ -108,20 +119,22 @@ sub wanted {
   open(OUT,">$outfile") or die "Couldn't open $outfile for writing";
   print STDERR "  Creating ", basename($outfile), " from $_ ";
   while (<IN>) {
+    next unless /\%\%[^\%]+\%\%/;
     foreach my $pattern (keys %SUBST) {
       if ($_ =~ /\%\%$pattern\%\%/) { 
 	print STDERR "."; 
 	$_ =~  s/\%\%$pattern\%\%/$SUBST{$pattern}/g;
       }
     }
+  } continue {
     print OUT;
   }
   print STDERR "\n";
   close(OUT);
   close(IN);
 
-  # make the perl scripts executable
-  if ($outfile =~ m/\.pl$/) {
+  # make the perl scripts executable, or any already executable file
+  if ($outfile =~ m/\.pl$/ || -x $File::Find::name) {
     chmod(0775,$outfile);
   } else {
     chmod(0664,$outfile);

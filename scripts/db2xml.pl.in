@@ -1,8 +1,7 @@
 %%START_PERL%% 
-my $VERSION = q[$Id: db2xml.pl.in,v 1.29.2.1 2001/01/15 18:52:04 jes Exp $];
+my $VERSION = q[$Id: db2xml.pl.in,v 1.36 2001/02/05 16:33:24 jes Exp $];
 # BEGIN{use Env qw(DISPLAY); $DISPLAY='ludwig:0';}
 use strict;
-# use blib;
 use Benchmark;
 use Carp;
 use Getopt::Long;
@@ -14,7 +13,8 @@ use Env qw(USER);
 use vars qw(%OPTIONS);
 
 my $GENEXML_DIR = '%%GENEXML_DIR%%';
-my $CACHE_DIR   = '%%GENEX_CACHE_DIR%%/db2xml';
+my $CB_CACHE_DIR   = '%%GENEX_CB_CACHE_DIR%%';
+my $EXP_CACHE_DIR   = '%%GENEX_EXP_CACHE_DIR%%';
 ###
 ### No modifications after this point
 ###
@@ -31,6 +31,8 @@ BEGIN {
   $OPTIONS{user} = '';
   $OPTIONS{password} = '';
   $OPTIONS{cb} = 0;
+  $OPTIONS{authenticate} = 0;
+  $OPTIONS{no_cache} = 0;
   $OPTIONS{directory} = '';
   $OPTIONS{am_types} = [];
 #  $OPTIONS{help};
@@ -38,7 +40,6 @@ BEGIN {
 
   # debug options must be globally visible
   $OPTIONS{debug}           = 0;
-  $OPTIONS{debug_no_csf}    = 0;
   $OPTIONS{debug_no_usf}    = 0;
   $OPTIONS{debug_one_hyb}   = 0;
   $OPTIONS{debug_one_ams}   = 0;
@@ -55,8 +56,9 @@ BEGIN {
 		      'species=s@',
 		      'am_types=s@',
 		      'debug',
+		      'authenticate',
+		      'no_cache',
 		      'profile',
-		      'debug_no_csf',
 		      'debug_no_usf',
 		      'debug_no_ams',
 		      'debug_no_als',
@@ -78,13 +80,14 @@ usage:
 
 Required arguments: 
       --directory=dir_name  <all files are written to dir_name>
-      --user=name 
-      --password=passw [options]
 
 Optional arguments: 
   for --cb:
         --species=spc1[,spc2[,...]]  <only species spc1 in control bundle,
                                       default is all species in DB>
+      --authenticate     <require --user and --password>
+        --user=name 
+        --password=passw [options]
 
   for --exp:
         --am_types=type1[,type2[,...]] <only print arrays of given type>
@@ -101,7 +104,6 @@ Debug options:
       --profile         <outputs performance benchmarks>
       --debug_one_ams   <only the first array from each hybridization included>
       --debug_one_hyb   <only the first hybridization included>
-      --debug_no_csf    <no external CSF files included>
       --debug_no_usf    <no external USF files included>
       --debug_no_ams    <no external AMS files included>
       --debug_no_als    <no external ALS files included>
@@ -133,26 +135,24 @@ EOU
 ###
 ### Now do the rest of the modules
 ###
-use POSIX 'strftime';
 use File::Basename;
 %%GENEX_EXTRALIBS%%
+# use blib;
 
 use XML::DOM;
 
-use Bio::Genex;
+use Bio::Genex qw(timestamp);
 use Bio::Genex::DBUtils qw(fetch_spot_data 
 		      fetch_es_species 
 		      fetch_am_ids 
 		      fetch_user_al_ids
 		      check_password
 		      create_select_sql);
-use Bio::Genex::XMLUtils qw(assert_element
-		       pretty_print);
+use Bio::Genex::XMLUtils qw(pretty_print);
 use Bio::Genex::ExperimentSet;
 use Bio::Genex::Protocol;
 use Bio::Genex::ExperimentFactors;
 use Bio::Genex::UserSequenceFeature;
-use Bio::Genex::CanonicalSequenceFeature;
 use Bio::Genex::Contact;
 use Bio::Genex::Scanner;
 use Bio::Genex::Spotter;
@@ -178,7 +178,6 @@ if ($OPTIONS{debug_no_ext}) {
   $OPTIONS{debug_no_ams} = 1;
   $OPTIONS{debug_no_als} = 1;
   $OPTIONS{debug_no_usf} = 1;
-  $OPTIONS{debug_no_csf} = 1;
 }
 
 # species can be specified in two ways:
@@ -300,7 +299,6 @@ END
 # used for bookeeping the external files
 my $FILE_ID=1;
 my $USF=1;
-my $CSF=1;
 my $AMS=1;
 my $ALS=1;
 my %ID;
@@ -329,7 +327,7 @@ my @FILE_LIST = ();
 my $cb_file_name;
 
 # parse the cvs_id string and set the other attributes
-#   $Id: db2xml.pl.in,v 1.29.2.1 2001/01/15 18:52:04 jes Exp $ 
+#   $Id: db2xml.pl.in,v 1.36 2001/02/05 16:33:24 jes Exp $ 
 my $genexml_node = get_genexml_tag();
 my $cvs_id = $genexml_node->getAttribute('cvs_id');
 my ($id_tag,$filename,$revision,$date,$time,$author,$state) = split(' ',$cvs_id);
@@ -337,49 +335,134 @@ $genexml_node->setAttribute('date',$date);
 $genexml_node->setAttribute('version',$revision);
 
 if (scalar @EXPERIMENTS) {
-  my $code = sub {do_experiments(@EXPERIMENTS)};
-  if ($OPTIONS{debug_profile}) {
-    my $t = timeit(1, $code);
-    print STDERR "Time for experiments = ", timestr($t), "\n";
+  my @experiments = Bio::Genex::ExperimentSet->get_objects(@EXPERIMENTS);
+  my $genexml = get_genexml_tag();
+  my $file_name;
+  my %CACHED;
+
+  # first see if we have cached files
+  if (!$OPTIONS{no_cache} && -d "$EXP_CACHE_DIR/" . $experiments[0]->es_pk) {
+    foreach my $es_db (@experiments) {
+      my $pk = $es_db->es_pk();
+      foreach (glob "$EXP_CACHE_DIR/$pk/*.{ext,xml}") {
+	my ($file) = fileparse($_);
+	print STDERR "writing $OPTIONS{directory}/$file ...\n";
+	system("cp $EXP_CACHE_DIR/$pk/$file $OPTIONS{directory}");
+	die "$0: Error moving cached file: $file: $!"
+	  if $?;
+	push(@FILE_LIST,"$OPTIONS{directory}/$file");
+      }
+    }
   } else {
-    $code->();
+    # no cached files present
+
+    # if we have multiple experiments, we call the main XML file
+    # somethings simple: experiments.xml
+    if (scalar @experiments > 1) {
+      $file_name = "$OPTIONS{directory}/experiments.xml";
+      open(OUT,">$file_name") or die "do_experiments: Couldn't open $file_name for writing";
+      push(@FILE_LIST,$file_name);    
+    }
+
+    foreach my $es_db (@experiments) {
+      # for each new experiment, we zero out the file counters
+      reset_external_counters();
+
+      # we let add_external_file know which experiment we're processing
+      $FILE_NAME = $es_db->name();
+
+      # if we're only writing a single experiment, call it by the 
+      # experiment set name
+      unless (defined $file_name) {
+	$file_name = "$OPTIONS{directory}/$FILE_NAME.xml";
+	open(OUT,">$file_name") 
+	  or die "do_experiments: Couldn't open $file_name for writing";
+	push(@FILE_LIST,$file_name);
+      }
+      my $es_node;
+      my $code = sub {
+	$es_node = do_experiment($es_db);
+	$genexml->appendChild($es_node);
+      };
+      my $PK = $es_db->es_pk();
+      if ($OPTIONS{debug_profile}) {
+	my $t = timeit(1, $code);
+	print STDERR "Time for experiment: $PK = ", timestr($t), "\n";
+      } else {
+	$code->();
+      }
+      # print the data to the file, and close the handle
+      print OUT pretty_print($DOC->toString());
+      #   print OUT $DOC->toString();
+      close(OUT);
+
+      if (!$OPTIONS{no_cache}) {
+	# since there were no cached files, we add them
+	foreach (@FILE_LIST) {
+	  unless (exists $CACHED{$_}) {
+	    mkdir("$EXP_CACHE_DIR/$PK", 0777);
+	    system("cp $_ $EXP_CACHE_DIR/$PK");
+	    $CACHED{$_}++;
+	  }
+	}
+      }
+    }
   }
 } elsif ($OPTIONS{cb}) {
   # we let add_external_file know what we're doing
   $FILE_NAME = 'control-bundle';
   $cb_file_name = $OPTIONS{directory} . '/' . $FILE_NAME . '.xml';
-  $CACHE_DIR .= '/cb';
-  if (-e "$CACHE_DIR/$FILE_NAME.xml") {
-    foreach (glob "$CACHE_DIR/*.{ext,xml}") {
+  if (!$OPTIONS{no_cache} && -e "$CB_CACHE_DIR/$FILE_NAME.xml") {
+    foreach (glob "$CB_CACHE_DIR/*.{ext,xml}") {
       my ($file) = fileparse($_);
+      next if $file eq 'control-bundle.xml';
+
       print STDERR "writing $OPTIONS{directory}/$file ...\n";
-      system("cp $CACHE_DIR/$file $OPTIONS{directory}");
+      system("cp $CB_CACHE_DIR/$file $OPTIONS{directory}");
       die "$0: Error moving cached file: $file: $!"
 	if $?;
       push(@FILE_LIST,"$OPTIONS{directory}/$file");
     }
-    print STDOUT join("\n",@FILE_LIST);
-    exit(0);
-  }
-  open(OUT,">$cb_file_name") 
-    or die "$0: Couldn't open $cb_file_name for writing";
-  push(@FILE_LIST,$cb_file_name);
-  my $code = sub {do_control_bundle()};
-  if ($OPTIONS{profile}) {
-    my $t = timeit(1, $code);
-    print STDERR "Time for control bundle = ", timestr($t), "\n";
-  } else {
-    $code->();
-  }
-  #   print OUT pretty_print($DOC->toString());
-  print OUT $DOC->toString();
-  close(OUT);
-}
-# since there were no cached files, we add them
-foreach (@FILE_LIST) {
-  system("cp $_ $CACHE_DIR");
-}
+    # now we fix the <misc_list>,
+    # the old list was cached for the user, we need a new one
+    # first we clear the old one
+    $DOC = $PARSER->parsefile("$CB_CACHE_DIR/control-bundle.xml");
+    my $misc_node = get_misc_list_tag();
+    for my $child ($misc_node->getChildNodes()) {
+      $misc_node->removeChild($child);
+    }
+    # then we create a new one
+    do_misc();
 
+    # and write it out
+    open(OUT,">$cb_file_name") or
+      die "$0: Couldn't open $cb_file_name for writing\n";
+    print OUT pretty_print($DOC->toString());
+    close(OUT);
+    push(@FILE_LIST,$cb_file_name);
+  } else {
+    open(OUT,">$cb_file_name") 
+      or die "$0: Couldn't open $cb_file_name for writing";
+    push(@FILE_LIST,$cb_file_name);
+    my $code = sub {do_control_bundle()};
+    if ($OPTIONS{profile}) {
+      my $t = timeit(1, $code);
+      print STDERR "Time for control bundle = ", timestr($t), "\n";
+    } else {
+      $code->();
+    }
+    print OUT pretty_print($DOC->toString());
+    # print OUT $DOC->toString();
+    close(OUT);
+
+    if (!$OPTIONS{no_cache}) {
+      # since there were no cached files, we add them
+      foreach (@FILE_LIST) {
+	system("cp $_ $CB_CACHE_DIR");
+      }
+    }
+  }
+}
 # return the file list
 print STDOUT join("\n",@FILE_LIST);
 exit(0);
@@ -513,9 +596,15 @@ sub assert_experiment {
 # Helper Subroutines for creating XML
 #
 
+sub assert_element {
+  my ($node,$name) = @_;
+  croak "Not a valid DOM Element node" unless 
+    ref($node) eq 'XML::DOM::Element' &&
+      $node->getTagName() eq $name;
+}
+
 sub reset_external_counters {
   $USF=1;
-  $CSF=1;
   $AMS=1;
   $ALS=1;
 }
@@ -534,7 +623,7 @@ sub add_external_file {
   #   $name _ $type _ $num . $ext
   #
   # where $name is either the experiment set name or 'control-bundle'.
-  #       $type is USF/CSF/ALS/AMS
+  #       $type is USF/ALS/AMS
   #       $num  is a two digit number
   #       $ext  is 'ext' for external files
   #
@@ -549,8 +638,6 @@ sub add_external_file {
     $file_name .= sprintf("%.2d", $ALS++);
   } elsif ($type eq 'AMS') {
     $file_name .= sprintf("%.2d", $AMS++);
-  } elsif ($type eq 'CSF') {
-    $file_name .= sprintf("%.2d", $CSF++);
   }
   $file_name .= '.ext';		# print the $ext
   push(@FILE_LIST,$file_name);
@@ -618,8 +705,8 @@ sub create_element {
 #   main entry point for writing control bundle
 #
 sub do_control_bundle {
-  # first we validate
-  my $us_fk = do_misc();
+#  my $us_fk = do_misc();
+  do_misc();
   do_controlled_vocab();
 
   # By default we list all species in control bundle
@@ -629,14 +716,14 @@ sub do_control_bundle {
       do_species(Bio::Genex::Species->new(id=>$spc_id));
     }
   } else {
-    foreach my $spc_db (Bio::Genex::Species->get_objects('ALL')) {
+    foreach my $spc_db (Bio::Genex::Species->get_all_objects()) {
       do_species($spc_db);
     }
   }
 
   # for now all contact and group info is written
   do_all_contact();
-  do_all_group();
+#  do_all_group();
 
   do_all_db();
   do_all_scanner();
@@ -645,50 +732,13 @@ sub do_control_bundle {
   do_all_protocol();
   unless ($OPTIONS{debug_no_als}) {
     if ($OPTIONS{profile}) {
-      my $t = timeit(1, sub {do_all_al($us_fk)});
+      my $t = timeit(1, sub {do_all_al()});
       print STDERR "Time for ALS = ", timestr($t), "\n";
     } else {
-      do_all_al($us_fk);
+      do_all_al();
     }
   }
 }
-  
-sub do_experiments {
-  my @exp_ids = @_;
-
-  my @experiments = Bio::Genex::ExperimentSet->get_objects(@exp_ids);
-  my $genexml = get_genexml_tag();
-
-  my $file_name;
-  if (scalar @experiments > 1) {
-    $file_name = $OPTIONS{directory} . '/' . 'experiments.xml';
-    open(OUT,">$file_name") or die "do_experiments: Couldn't open $file_name for writing";
-    push(@FILE_LIST,$file_name);    
-  }
-
-  foreach my $es_db (@experiments) {
-    # for each new experiment, we zero out the file counters
-    reset_external_counters();
-
-    # we let add_external_file know which experiment we're processing
-    $FILE_NAME = $es_db->name();
-
-    # if we're only writing a single experiment, call it by the 
-    # experiment set name
-    unless (defined $file_name) {
-      $file_name = $OPTIONS{directory} . '/' . $FILE_NAME . '.xml';
-      open(OUT,">$file_name") or die "do_experiments: Couldn't open $file_name for writing";
-      push(@FILE_LIST,$file_name);
-    }
-    my $es_node = do_experiment($es_db);
-    $genexml->appendChild($es_node);
-  }
-  # print the data to the file, and close the handle
-  print OUT pretty_print($DOC->toString());
-#   print OUT $DOC->toString();
-  close(OUT);
-}
-
 sub do_experiment {
   my $es_db = shift;
 
@@ -715,22 +765,14 @@ sub do_experiment {
   do_species($spc_db);
 
   # do the citations
-  # we know that citationlink_obj() is defined to return an
-  # array reference (which may reference an empty array), so it is
-  # safe to directly interpolate and call 'scalar' to check for
-  # the existence of data
-  if (scalar @{$es_db->citationlink_obj}) {
-    my @citation_ids;
-    foreach my $cit_db (@{$es_db->citationlink_obj}) {
-      push(@citation_ids,do_citation($cit_db));
-    }
-    $es_node->setAttribute('citation_ids',join(' ',@citation_ids));
+  if (defined $es_db->cit_obj) {
+    $es_node->setAttribute('citation_ids',do_citation($es_db->cit_obj));
   } else {
     # not all experiments have citations, so this is not a warning
   }
 
   # get the owner's contact information
-  my $owner_id = do_contact($es_db->us_obj->con_obj);
+  my $owner_id = do_contact($es_db->provider_con_obj);
   $es_node->setAttribute('owner_contact_id', $owner_id);
 
   # do the group
@@ -813,21 +855,23 @@ sub do_experiment {
 #
 
 sub do_misc {
-  # validate the user
-  croak "Must specify a user" unless $OPTIONS{user};
-  croak "Must specify a password" unless $OPTIONS{password};
-
   my $dbh = Bio::Genex::current_connection();
 
-  # validate the password
-  my $us_pk = check_password($dbh,$OPTIONS{user},$OPTIONS{password});
-  die  "do_misc: Bad Password for user: $OPTIONS{user}" 
-    unless defined $us_pk;
+  if ($OPTIONS{authenticate}) {
+    # only validate the user if we've been asked to
+    croak "Must specify a user" unless $OPTIONS{user};
+    croak "Must specify a password" unless $OPTIONS{password};
 
-  my $us_db = Bio::Genex::UserSec->new(id=>$us_pk);
-  my $contact = $us_db->con_obj();
-  unless (defined lookup_id('Contact',$contact->con_pk)) {
-    do_contact($contact);
+    # validate the password
+    my $us_pk = check_password($dbh,$OPTIONS{user},$OPTIONS{password});
+    die  "do_misc: Bad Password for user: $OPTIONS{user}" 
+      unless defined $us_pk;
+
+    my $us_db = Bio::Genex::UserSec->new(id=>$us_pk);
+    my $contact = $us_db->con_obj();
+    unless (defined lookup_id('Contact',$contact->con_pk)) {
+      do_contact($contact);
+    }
   }
 
   # announce our progress
@@ -874,13 +918,12 @@ sub do_misc {
   my $time_node = create_element('misc_qualifier');
   # add it to the tree
   $time_node->setAttribute(name=>'creation_time');
-  my $timeformat = '%r %A %B %d %Y'; 
-  my $current_time = strftime($timeformat, localtime);
+  my $current_time = timestamp();
   $time_node->setAttribute(value=>$current_time);
   $misc_list->appendChild($time_node);
 
   # add experiment set names
-  my @experiments = Bio::Genex::ExperimentSet->get_objects('ALL');
+  my @experiments = Bio::Genex::ExperimentSet->get_all_objects();
   foreach my $es_db (@experiments) {
     my $experiment_name_node = create_element('misc_qualifier');
     # add it to the tree
@@ -890,7 +933,7 @@ sub do_misc {
   }
 
   # we're done
-  return $us_db->us_pk();    
+#  return $us_db->us_pk();    
 }
 
 sub by_cv_term {
@@ -913,7 +956,7 @@ sub do_controlled_vocab {
     
     # we sort the terms 
     my @objs = sort {$::a->term_string cmp $::b->term_string} 
-      $class->get_objects('ALL');
+      $class->get_all_objects();
   TERM: foreach my $term (@objs) {
       my $term_string = $term->term_string();
       # don't add empty terms
@@ -936,31 +979,31 @@ sub do_controlled_vocab {
 }
 
 sub do_all_protocol {
-  foreach my $sw_db (Bio::Genex::Protocol->get_objects('ALL')) {
+  foreach my $sw_db (Bio::Genex::Protocol->get_all_objects()) {
     do_protocol($sw_db);
   }
 }
 
 sub do_all_software {
-  foreach my $sw_db (Bio::Genex::Software->get_objects('ALL')) {
+  foreach my $sw_db (Bio::Genex::Software->get_all_objects()) {
     do_software($sw_db);
   }
 }
 
 sub do_all_scanner {
-  foreach my $scn_db (Bio::Genex::Scanner->get_objects('ALL')) {
+  foreach my $scn_db (Bio::Genex::Scanner->get_all_objects()) {
     do_scanner($scn_db);
   }
 }
 
 sub do_all_spotter {
-  foreach my $spt_db (Bio::Genex::Spotter->get_objects('ALL')) {
+  foreach my $spt_db (Bio::Genex::Spotter->get_all_objects()) {
     do_spotter($spt_db);
   }
 }
 
 sub do_all_db {
-  my @dbs = Bio::Genex::ExternalDatabase->get_objects('ALL');
+  my @dbs = Bio::Genex::ExternalDatabase->get_all_objects();
   my $external_database_list_node = get_header_list_node('external_database_list');
   foreach my $db (@dbs) {
     # don't make a new one if we have it already
@@ -979,23 +1022,23 @@ sub do_all_db {
 }
 
 sub do_all_contact {
-  foreach my $con_db (Bio::Genex::Contact->get_objects('ALL')) {
+  foreach my $con_db (Bio::Genex::Contact->get_all_objects()) {
     do_contact($con_db);
   }
 }
 
 sub do_all_group {
-  foreach my $grp_db (Bio::Genex::GroupSec->get_objects('ALL')) {
+  foreach my $grp_db (Bio::Genex::GroupSec->get_all_objects()) {
     do_group($grp_db);
   }
 }
 
 sub do_all_al {
-  my $us_fk = shift;
+#  my $us_fk = shift;
 
-  my @al_ids = fetch_user_al_ids($us_fk);
+#  my @al_ids = fetch_user_al_ids($us_fk);
 #   foreach my $al_db (Bio::Genex::ArrayLayout->get_objects(@al_ids)) {
-  foreach my $al_db (Bio::Genex::ArrayLayout->get_objects('ALL')) {
+  foreach my $al_db (Bio::Genex::ArrayLayout->get_all_objects()) {
     do_al($al_db);
   }
 }
@@ -1083,7 +1126,7 @@ END
   my ($ALS_node) = $als_doc->getElementsByTagName('ALS');
 
   # parse the cvs_id string and set the other attributes
-  #   $Id: db2xml.pl.in,v 1.29.2.1 2001/01/15 18:52:04 jes Exp $ 
+  #   $Id: db2xml.pl.in,v 1.36 2001/02/05 16:33:24 jes Exp $ 
   my $cvs_id = $ALS_node->getAttribute('cvs_id');
   my ($id_tag,$filename,$revision,$date,$time,$author,$state) = split(' ',$cvs_id);
   $ALS_node->setAttribute('date',$date);
@@ -1361,17 +1404,6 @@ sub do_species {
 	$code->();
       }
     }
-    
-    # do the canonical sequence features
-    unless ($OPTIONS{debug_no_csf}) {
-      my $code = sub {do_csf($spc_db)};
-      if ($OPTIONS{profile}) {
-	my $t = timeit(1, $code);
-	print STDERR "Time for CSF = ", timestr($t), "\n";
-      } else {
-	$code->();
-      }
-    }
     $id = create_id('Species', $spc_db->spc_pk);
     $species_node->setAttribute('id',$id);
   }
@@ -1453,7 +1485,7 @@ END
   my ($USF_node) = $usf_doc->getElementsByTagName('USF');
 
   # parse the cvs_id string and set the other attributes
-  #   $Id: db2xml.pl.in,v 1.29.2.1 2001/01/15 18:52:04 jes Exp $ 
+  #   $Id: db2xml.pl.in,v 1.36 2001/02/05 16:33:24 jes Exp $ 
   my $cvs_id = $USF_node->getAttribute('cvs_id');
   my ($id,$filename,$revision,$date,$time,$author,$state) = split(' ',$cvs_id);
   $USF_node->setAttribute('date',$date);
@@ -1531,7 +1563,7 @@ END
 	my $hit_node = $usf_doc->createElement('hit');
 	$blast_node->appendChild($hit_node);
 	$hit_node->setAttribute('match_name',$hit_db->match_accession);
-	$hit_node->setAttribute('e_score',$hit_db->expect);
+	$hit_node->setAttribute('e_score',$hit_db->expect_value);
       }
     }
 
@@ -1582,159 +1614,6 @@ END
   close(USF);
 }
 
-sub do_csf {
-  my $spc_db = shift;
-
-  #
-  # We first check whether there are any USF to write
-  #   if there aren't, we return without creating any elements
-  #
-
-  # for debugging
-  my $CSF_LIMIT = 10;
-  $Bio::Genex::CanonicalSequenceFeature::LIMIT = $CSF_LIMIT if $OPTIONS{debug};
-
-  # we know that canonicalsequencefeature_obj() is defined to return an
-  # array reference (which may reference an empty array), so it is
-  # safe to directly interpolate and call 'scalar' to check for the
-  # existence of data
-  my @csf_list;
-  if ($OPTIONS{profile}) {
-    my $t = timeit(1, sub {
-		     @csf_list  = @{$spc_db->canonicalsequencefeature_obj()};
-		   });
-    print STDERR "Time for retrieving CSF data = ", timestr($t), "\n";
-  } else {
-    @csf_list  = @{$spc_db->canonicalsequencefeature_obj()};
-  }
-
-  unless (scalar @csf_list) {
-    warn "No CanonicalSequenceFeatures for species ", 
-      $spc_db->primary_scientific_name(), "\n";
-    return;
-  }
-
-  #
-  # If we've gotten here, then there are CSF values to write out
-  #
-
-  my $csf_list_node = get_header_list_node('csf_list');
-
-  # set up the internal DTD
-  my $GENEXML_DTD = $GENEXML_DIR . '/csf.dtd';
-  open(GENEXML,$GENEXML_DTD) or die "do_csf: Couldn't open $GENEXML_DTD for reading";
-  
-  # slurp the file into a single scalar
-  undef $/;
-  my $DTD = <GENEXML>;
-  close(GENEXML);
-  
-  my $DOCTYPE = '<!DOCTYPE CSF [' . "\n";
-  $DOCTYPE .= $DTD;
-  $DOCTYPE .= "\n" . ']>';
-  
-  my $CSF_GENEXML = <<"END";
-<?xml version="1.0"  encoding="UTF-8" standalone="no"?>
-$DOCTYPE
-
-<CSF cvs_id="&VERSION;"/>
-END
-
-  # we create a new parser, so that memory will be disposed when we
-  # leave the subroutine
-  my $parser = XML::DOM::Parser->new();
-  my $csf_doc = $parser->parse($CSF_GENEXML);
-  my ($CSF_node) = $csf_doc->getElementsByTagName('CSF');
-
-  # parse the cvs_id string and set the other attributes
-  #   $Id: db2xml.pl.in,v 1.29.2.1 2001/01/15 18:52:04 jes Exp $ 
-  my $cvs_id = $CSF_node->getAttribute('cvs_id');
-  my ($id,$filename,$revision,$date,$time,$author,$state) = split(' ',$cvs_id);
-  $CSF_node->setAttribute('date',$date);
-  $CSF_node->setAttribute('version',$revision);
-
-  # create the link to the data file
-  my ($csf_file_name,$file_id) = add_external_file('CSF');
-  print STDERR "Printing CSF data to $csf_file_name\n";
-
-  # species_id
-  my $species_id = lookup_id('Species',$spc_db->spc_pk,1);
-
-  my $data_node = create_element('data');
-  $data_node->setAttribute('external_file_id',$file_id);
-  $csf_list_node->appendChild($data_node);
-
-  # first add the DBs, so that we can look them up later
-  do_all_db();
-
-  my $i;
-  my $initial_time = new Benchmark;
-  my $total = scalar @csf_list;
-  $total = $CSF_LIMIT if $OPTIONS{DEBUG};
-  foreach my $csf_db (@csf_list) {
-    $i++;
-    if ($i % 250 == 0) {
-      my $time_str = timestr(timediff(new Benchmark,$initial_time));
-      my ($cur_time) = $time_str =~ /(\d+)\s+wallclock secs/;
-      print STDERR "Processing CSF number $i, ";
-      my $time_left = $cur_time * ($total/$i) - $cur_time;
-      if ($time_left <= 0) {
-	print STDERR "finished\n";
-      } else {
-	printf STDERR "%5.2f secs remaining for processing\n", $time_left;
-      }
-    }
-    my $csf_node = $csf_doc->createElement('sequence_feature');
-    foreach my $col (qw(chromosome
-		short_description)) {
-      $csf_node->setAttribute($col,$csf_db->$col());
-    }
-
-    # DB accession numbers
-    # we know that csf_externaldblink_obj() is defined to return an
-    # array reference (which may reference an empty array), so it is
-    # safe to directly interpolate and call 'scalar' to check for
-    # the existence of data
-    if (scalar @{$csf_db->csf_externaldblink_obj}) {
-      my $database_list_node = $csf_doc->createElement('database_accession_nums');
-      $csf_node->appendChild($database_list_node);
-      
-      # make a list of DB nums
-      foreach my $db_link (@{$csf_db->csf_externaldblink_obj}) {
-	my $database_node = $csf_doc->createElement('database');
-	$database_list_node->appendChild($database_node);
-	
-	my $db_id = lookup_id('ExternalDatabase',$db_link->db_name) ||
-	  die "do_csf: Couldn't get DB ID for ", $db_link->db_name();
-	$database_node->setAttribute('accession_num',
-				     $db_link->external_identifier);
-	$database_node->setAttribute('database_id',$db_id);
-      }
-    }
-
-    $csf_node->setAttribute('csf_name',$csf_db->csf_name());
-    $csf_node->setAttribute('csf_type',$csf_db->csf_type());
-    $csf_node->setAttribute('species_id',$species_id);
-
-    $csf_node->setAttribute('id',create_id('CanonicalSequenceFeature',
-					   $csf_db->csf_pk));
-
-    $CSF_node->appendChild($csf_node);
-  }
-  open(CSF,">$csf_file_name") or die "do_csf: Couldn't open $csf_file_name for writing";
-  my $code = sub {
-    print CSF pretty_print($csf_doc->toString());
-  };
-
-  if ($OPTIONS{profile}) {
-    my $t = timeit(1, $code);
-    print STDERR "Time for writing CSF XML = ", timestr($t), "\n";
-  } else {
-    $code->();
-  }
-  close(CSF);
-}
-
 sub do_citation {
   my $cit_db = shift;
 
@@ -1747,8 +1626,6 @@ sub do_citation {
     my $cit_node = create_element('citation');
     $cit_node_list->appendChild($cit_node);
     foreach my $col (@columns) {
-      next if $col =~ /^type$/;
-      next if $col =~ /^last_updated$/;
       next if $col =~ /^cit_pk$/;
       my $text = $cit_db->$col();
       next unless defined $text && $text !~ /^\s*$/;
@@ -1757,8 +1634,6 @@ sub do_citation {
       $cit_node->appendChild($node);
       $node->addText($text);
     }
-    $cit_node->setAttribute('last_updated',$cit_db->last_updated);
-    $cit_node->setAttribute('type',$cit_db->type);
     $id = create_id('Citation',$cit_db->cit_pk);
     $cit_node->setAttribute('id',$id);
   }
@@ -2209,7 +2084,7 @@ END
   my ($AMS_node) = $ams_doc->getElementsByTagName('AMS');
 
   # parse the cvs_id string and set the other attributes
-  #   $Id: db2xml.pl.in,v 1.29.2.1 2001/01/15 18:52:04 jes Exp $ 
+  #   $Id: db2xml.pl.in,v 1.36 2001/02/05 16:33:24 jes Exp $ 
   my $cvs_id = $AMS_node->getAttribute('cvs_id');
   my ($id,$filename,$revision,$date,$time,$author,$state) = split(' ',$cvs_id);
   $AMS_node->setAttribute('date',$date);
@@ -2534,8 +2409,7 @@ the file 'filename.xml'. The output will first be run through
 XMLUtils::pretty_print() to format the output to be more
 human-readable. This option is mutually exclusive with the --exp
 option. Depending on which other options are used, other supporting
-XML files may be written as well (array layout, user sequence feature,
-or canonical sequence feature).
+XML files may be written as well (array layout, user sequence feature).
 
 =item --exp=$exp_id
 

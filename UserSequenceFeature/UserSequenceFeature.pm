@@ -2,9 +2,9 @@
 #
 # Bio::Genex::UserSequenceFeature
 #
-# created on Mon Jan 15 11:06:30 2001 by /home/jasons/work/GeneX-WWW-Installer/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-WWW-Installer/Genex --target=UserSequenceFeature --support=HotSpots --support=BlastHits --support=USF_ExternalDBLink
+# created on Mon Feb  5 21:23:54 2001 by /home/jasons/work/GeneX-Server/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-Server/Genex --target=UserSequenceFeature --support=HotSpots --support=BlastHits --support=USF_ExternalDBLink
 #
-# cvs id: $Id: UserSequenceFeature.pm,v 1.10.2.1 2001/01/15 18:52:02 jes Exp $ 
+# cvs id: $Id: UserSequenceFeature.pm,v 1.14 2001/02/06 18:58:52 jes Exp $ 
 #
 ##############################
 package Bio::Genex::UserSequenceFeature;
@@ -22,13 +22,13 @@ use Bio::Genex::DBUtils qw(:CREATE
 use Bio::Genex qw(undefined);
 use Bio::Genex::Fkey qw(:FKEY);
 
-use ObjectTemplate 0.21;
+use Class::ObjectTemplate::DB 0.21;
 
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $FKEYS $COLUMN2NAME $NAME2COLUMN $COLUMN_NAMES %_CACHE $USE_CACHE $LIMIT $FKEY_OBJ2RAW $TABLE2PKEY);
 
 require Exporter;
 
-@ISA = qw(ObjectTemplate Exporter);
+@ISA = qw(Class::ObjectTemplate::DB Exporter);
 
 # Items to export into callers namespace by default. Note: do not export
 # names by default without a very good reason. Use EXPORT_OK instead.
@@ -43,12 +43,11 @@ BEGIN {
   $COLUMN_NAMES = [
           'usf_pk',
           'spc_fk',
+          'provider_con_fk',
           'usf_name',
           'usf_type',
           'other_name',
           'other_type',
-          'putative_csf_fk',
-          'nonunique_flag',
           'smp_fk',
           'owner_us_fk',
           'clone_name',
@@ -79,18 +78,18 @@ BEGIN {
                                 'fkey_name' => 'spc_obj',
                                 'pkey_name' => 'spc_pk'
                               }, 'Bio::Genex::Fkey' ),
+          'provider_con_obj' => bless( {
+                                         'table_name' => 'Contact',
+                                         'fkey_type' => 'FKEY_OO',
+                                         'fkey_name' => 'provider_con_obj',
+                                         'pkey_name' => 'con_pk'
+                                       }, 'Bio::Genex::Fkey' ),
           'usf_externaldblink_obj' => bless( {
                                                'fkey_type' => 'ONE_TO_MANY_LINK_OO',
                                                'table_name' => 'USF_ExternalDBLink',
                                                'fkey_name' => 'usf_externaldblink_obj',
                                                'pkey_name' => 'usf_fk'
                                              }, 'Bio::Genex::Fkey' ),
-          'putative_csf_obj' => bless( {
-                                         'table_name' => 'CanonicalSequenceFeature',
-                                         'fkey_type' => 'FKEY_OO',
-                                         'fkey_name' => 'putative_csf_obj',
-                                         'pkey_name' => 'csf_pk'
-                                       }, 'Bio::Genex::Fkey' ),
           'hotspots_obj' => bless( {
                                      'fkey_type' => 'ONE_TO_MANY_LINK_OO',
                                      'table_name' => 'HotSpots',
@@ -132,29 +131,26 @@ BEGIN {
 
   $COLUMN2NAME  = {
           'usf_name' => 'Sequence Feature Name',
+          'chromosome' => 'Chromosome Location',
+          'usf_pk' => 'Accession Number',
+          'provider_con_fk' => 'Data Provider',
+          'spc_fk' => 'Species',
+          'other_type' => 'Other Type',
+          'clone_name' => 'Clone Name',
+          'owner_us_fk' => 'Owner',
           'usf_type' => 'Sequence Feature Type',
+          'smp_fk' => 'Sample',
+          'end_position' => 'End Position',
+          'con_fk' => 'Contact',
           'short_description' => 'Short Description',
           'sequence' => 'Sequence',
           'start_position' => 'Start Position',
-          'other_name' => 'Other Name',
-          'usf_pk' => 'Accession Number',
-          'putative_csf_fk' => 'Putative Canonical Feature',
-          'chromosome' => 'Chromosome Location',
-          'spc_fk' => 'Species',
-          'other_type' => 'Other Type',
-          'owner_us_fk' => 'Owner',
-          'clone_name' => 'Clone Name',
-          'nonunique_flag' => 'Non Unique',
-          'smp_fk' => 'Sample',
-          'con_fk' => 'Contact',
-          'end_position' => 'End Position'
+          'other_name' => 'Other Name'
         }
 ;
   $NAME2COLUMN  = {
           'End Position' => 'end_position',
-          'Putative Canonical Feature' => 'putative_csf_fk',
           'Sample' => 'smp_fk',
-          'Non Unique' => 'nonunique_flag',
           'Sequence' => 'sequence',
           'Other Name' => 'other_name',
           'Sequence Feature Name' => 'usf_name',
@@ -167,15 +163,16 @@ BEGIN {
           'Clone Name' => 'clone_name',
           'Contact' => 'con_fk',
           'Owner' => 'owner_us_fk',
-          'Chromosome Location' => 'chromosome'
+          'Chromosome Location' => 'chromosome',
+          'Data Provider' => 'provider_con_fk'
         }
 ;
   $FKEY_OBJ2RAW = {
           'smp_obj' => 'smp_fk',
           'con_obj' => 'con_fk',
           'spc_obj' => 'spc_fk',
+          'provider_con_obj' => 'provider_con_fk',
           'usf_externaldblink_obj' => 'usf_externaldblink_fk',
-          'putative_csf_obj' => 'putative_csf_fk',
           'owner_us_obj' => 'owner_us_fk',
           'hotspots_obj' => 'hotspots_fk',
           'blasthits_obj' => 'blasthits_fk'
@@ -184,7 +181,7 @@ BEGIN {
 }
 
 
-attributes (no_lookup=>['fetched', 'fetch_all', 'fetched_attr', 'id'], lookup=>['usf_pk', 'spc_fk', 'usf_name', 'usf_type', 'other_name', 'other_type', 'putative_csf_fk', 'nonunique_flag', 'smp_fk', 'owner_us_fk', 'clone_name', 'con_fk', 'chromosome', 'start_position', 'end_position', 'sequence', 'short_description', 'putative_csf_obj', 'smp_obj', 'owner_us_obj', 'con_obj', 'blasthits_obj', 'blasthits_fk', 'usf_externaldblink_obj', 'usf_externaldblink_fk', 'hotspots_obj', 'hotspots_fk', 'spc_obj']);
+attributes (no_lookup=>['fetched', 'fetch_all', 'fetched_attr', 'id'], lookup=>['usf_pk', 'spc_fk', 'provider_con_fk', 'usf_name', 'usf_type', 'other_name', 'other_type', 'smp_fk', 'owner_us_fk', 'clone_name', 'con_fk', 'chromosome', 'start_position', 'end_position', 'sequence', 'short_description', 'provider_con_obj', 'smp_obj', 'owner_us_obj', 'con_obj', 'blasthits_obj', 'blasthits_fk', 'usf_externaldblink_obj', 'usf_externaldblink_fk', 'hotspots_obj', 'hotspots_fk', 'spc_obj']);
 
 sub table_name {return 'UserSequenceFeature';} # probably unnecessary
 
@@ -282,116 +279,119 @@ sub update_db {
   return 1;
 }
 #
-# a workhorse function for retrieving multiple objects of a class
+# a workhorse function for retrieving ALL objects of a class
 #
-sub get_objects {
+sub get_all_objects {
   my ($class) = shift;
   my @objects;
   my $COLUMN2FETCH;
   my $VALUE2FETCH;
   my $pkey_name;
   my $has_args = 0;
+  $pkey_name = $class->pkey_name();
   if (ref($_[0]) eq 'HASH') {
-    $has_args = 1;
     # we were called with an anonymous hash as the first parameter
     # grab it and parse the parameter => value pairs
     my $hashref = shift;
+    $has_args = 1;
     $COLUMN2FETCH =  $hashref->{column} if exists $hashref->{column};
     $VALUE2FETCH =  $hashref->{value} if exists $hashref->{value};
-    die "Bio::Genex::UserSequenceFeature::get_objects: Must define both 'column' and 'value'" 
+    die "Bio::Genex::UserSequenceFeature::get_all_objects: Must define both 'column' and 'value'" 
       if ((defined $VALUE2FETCH) && not (defined $COLUMN2FETCH)) || 
           ((defined $COLUMN2FETCH) && not (defined $VALUE2FETCH));
   }
-  $pkey_name = $class->pkey_name();
-  my @ids = @_;
-  if (scalar @ids == 0 && ! $has_args) {
-    croak("Bio::Genex::UserSequenceFeature::get_objects called with no ID's
+
+  my @ids;
+
+  # using class methods seems indirect, but it deals
+  # properly with inheritance
+  my $FROM = [$class->table_name()];
+
+  # we fetch *all* columns, so that we can populate the new objects
+  my $COLUMNS = ['*'];
+
+  my $dbh = Bio::Genex::current_connection();
+  my @args = (COLUMNS=>$COLUMNS, FROM=>$FROM);
+  if (defined $COLUMN2FETCH) {
+    my $where =  "$COLUMN2FETCH = ". $dbh->quote($VALUE2FETCH);
+    push(@args,WHERE=>$where);
+  }
+  push(@args,LIMIT=>$LIMIT) if defined $LIMIT;
+  my $sql = create_select_sql($dbh,@args);
+  my $sth = $dbh->prepare($sql) 
+    or die "Bio::Genex::UserSequenceFeature::get_all_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
+  $sth->execute() 
+    or die "Bio::Genex::UserSequenceFeature::get_all_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
+
+  # if there were no objects, return. decide whether to return an 
+  # empty list or an empty arrayref using wantarray
+  unless ($sth->rows()) {
+    return () if wantarray;
+    return []; # if not wantarray
+  }
+
+  # we use the 'NAME' attribute of the statement handle to get the
+  # list of columns that were fetched.
+  my @column_names = @{$sth->{NAME}};
+  my $rows = $sth->fetchall_arrayref();
+  die "Bio::Genex::UserSequenceFeature::get_all_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>" 
+    if $sth->err;
+  foreach my $col_ref (@{$rows}) {
+    # we create a blank object, and populate it with data ourselves
+    my $obj = $class->new();
+
+    # %fetched_attrs is used to track which attributes have
+    # already been retrieved from the DB, so that Bio::Genex::undefined
+    # doesn't try to fetch them a second time if their value is undef
+    my %fetched_attrs;
+    for (my $i=0;$i < scalar @column_names; $i++) {
+      no strict 'refs';
+      my $col = $column_names[$i];
+      $obj->$col($col_ref->[$i]);
+
+      # record the column as fetched
+      $fetched_attrs{$col}++;
+    }
+    # store the record of the fetched columns
+    $obj->fetched_attr(\%fetched_attrs);
+    $obj->fetched(1);
+
+    # now we set the id so that delayed-fetching will work for
+    # the OO attributes
+    $obj->id($obj->get_attribute("$pkey_name"));
+    push(@objects,$obj);
+  }
+  $sth->finish();
+
+  # decide whether to return a list or an arrayref using wantarray
+  return @objects if wantarray;
+  return \@objects; # if not wantarray
+}
+
+#
+# a workhorse function for retrieving multiple objects of a class
+#
+sub get_objects {
+  my ($class) = shift;
+  my @objects;
+  if (ref($_[0]) eq 'HASH' || scalar @_ == 0) {
+    croak("Bio::Genex::UserSequenceFeature::get_objects called with no ID's, perhaps you meant to use Bio::Genex::UserSequenceFeature::get_all_objects
 ");
-  } elsif (scalar @ids == 0 ||
-           (scalar @ids == 1 && $ids[0] eq 'ALL')) {
-    # the user is requesting all objects of type $class from the DB
+  } 
+  my @ids = @_;
+  my $obj;
+  foreach (@ids) {
+    if ($USE_CACHE && exists $_CACHE{$_}) {
+	$obj = $_CACHE{$_};	# use it if it's in the cache
+    } else {
+	my @args = (id=>$_);
+	$obj = $class->new(@args);
 
-    # empty the id list
-    @ids = ();
-
-
-    # using class methods seems indirect, but it deals
-    # properly with inheritance
-    my $FROM = [$class->table_name()];
-
-    # we fetch *all* columns, so that we can populate the new objects
-    my $COLUMNS = ['*'];
-  
-    my $dbh = Bio::Genex::current_connection();
-    my @args = (COLUMNS=>$COLUMNS, FROM=>$FROM);
-    if (defined $COLUMN2FETCH) {
-      my $where =  "$COLUMN2FETCH = ". $dbh->quote($VALUE2FETCH);
-      push(@args,WHERE=>$where);
+	# if the id was bad, $obj will be undefined
+	next unless defined $obj;
+	$_CACHE{$_} = $obj if $USE_CACHE; # stick it in the cache for later
     }
-    push(@args,LIMIT=>$LIMIT) if defined $LIMIT;
-    my $sql = create_select_sql($dbh,@args);
-    my $sth = $dbh->prepare($sql) 
-      or die "Bio::Genex::UserSequenceFeature::get_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
-    $sth->execute() 
-      or die "Bio::Genex::UserSequenceFeature::get_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>";
-
-    # if there were no objects, return. decide whether to return an 
-    # empty list or an empty arrayref using wantarray
-    unless ($sth->rows()) {
-      return () if wantarray;
-      return []; # if not wantarray
-    }
-
-    # we use the 'NAME' attribute of the statement handle to get the
-    # list of columns that were fetched.
-    my @column_names = @{$sth->{NAME}};
-    my $rows = $sth->fetchall_arrayref();
-    die "Bio::Genex::UserSequenceFeature::get_objects:\nSQL=<$sql>,\nDBI=<$DBI::errstr>" 
-      if $sth->err;
-    foreach my $col_ref (@{$rows}) {
-      # we create a blank object, and populate it with data ourselves
-      my $obj = $class->new();
-
-      # %fetched_attrs is used to track which attributes have
-      # already been retrieved from the DB, so that Bio::Genex::undefined
-      # doesn't try to fetch them a second time if their value is undef
-      my %fetched_attrs;
-      for (my $i=0;$i < scalar @column_names; $i++) {
-	no strict 'refs';
-	my $col = $column_names[$i];
-	$obj->$col($col_ref->[$i]);
-
-	# record the column as fetched
-	$fetched_attrs{$col}++;
-      }
-      # store the record of the fetched columns
-      $obj->fetched_attr(\%fetched_attrs);
-
-      # now we set the id so that delayed-fetching will work for
-      # the OO attributes
-      $obj->id($obj->get_attribute("$pkey_name"));
-      push(@objects,$obj);
-    }
-    $sth->finish();
-  } else {
-    # we have been called with an @id_list
-    die "Can't use 'column' and 'value' specifiers with an \@id_list"
-      if defined $COLUMN2FETCH || defined $VALUE2FETCH;
-
-    my $obj;
-    foreach (@ids) {
-      if ($USE_CACHE && exists $_CACHE{$_}) {
-  	$obj = $_CACHE{$_};	# use it if it's in the cache
-      } else {
-  	my @args = (id=>$_);
-  	$obj = $class->new(@args);
-  
-  	# if the id was bad, $obj will be undefined
-  	next unless defined $obj;
-  	$_CACHE{$_} = $obj if $USE_CACHE; # stick it in the cache for later
-      }
-      push(@objects, $obj);
-    }
+    push(@objects, $obj);
   }
   # decide whether to return a list or an arrayref using wantarray
   return @objects if wantarray;
@@ -472,7 +472,7 @@ sub fetch {
   # for the purpose of inheritance
   assert_table_defined($dbh,$self->table_name());
   my $sql = create_select_sql($dbh,
-                    COLUMNS=>['usf_pk', 'spc_fk', 'usf_name', 'usf_type', 'other_name', 'other_type', 'putative_csf_fk', 'nonunique_flag', 'smp_fk', 'owner_us_fk', 'clone_name', 'con_fk', 'chromosome', 'start_position', 'end_position', 'sequence', 'short_description'],
+                    COLUMNS=>['usf_pk', 'spc_fk', 'provider_con_fk', 'usf_name', 'usf_type', 'other_name', 'other_type', 'smp_fk', 'owner_us_fk', 'clone_name', 'con_fk', 'chromosome', 'start_position', 'end_position', 'sequence', 'short_description'],
                     FROM=>[$self->table_name()],
                     WHERE=>$self->pkey_name() . " = '$pkey'",
                               );
@@ -530,7 +530,7 @@ Bio::Genex::UserSequenceFeature - Methods for processing data from the GeneX DB
 
 
   # retrieving all instances from a table
-  my @objects = Bio::Genex::UserSequenceFeature->get_objects('ALL');
+  my @objects = Bio::Genex::UserSequenceFeature->get_all_objects();
 
   # retrieving the primary key for an object, generically
   my $primary_key = $UserSequenceFeature->id();
@@ -541,6 +541,9 @@ Bio::Genex::UserSequenceFeature - Methods for processing data from the GeneX DB
   # retreving other DB column attributes
   my $spc_fk_val = $UserSequenceFeature->spc_fk();
   $UserSequenceFeature->spc_fk($value);
+
+  my $provider_con_fk_val = $UserSequenceFeature->provider_con_fk();
+  $UserSequenceFeature->provider_con_fk($value);
 
   my $usf_name_val = $UserSequenceFeature->usf_name();
   $UserSequenceFeature->usf_name($value);
@@ -553,12 +556,6 @@ Bio::Genex::UserSequenceFeature - Methods for processing data from the GeneX DB
 
   my $other_type_val = $UserSequenceFeature->other_type();
   $UserSequenceFeature->other_type($value);
-
-  my $putative_csf_fk_val = $UserSequenceFeature->putative_csf_fk();
-  $UserSequenceFeature->putative_csf_fk($value);
-
-  my $nonunique_flag_val = $UserSequenceFeature->nonunique_flag();
-  $UserSequenceFeature->nonunique_flag($value);
 
   my $smp_fk_val = $UserSequenceFeature->smp_fk();
   $UserSequenceFeature->smp_fk($value);
@@ -826,7 +823,7 @@ B<NOTE:> Any modification of the primary key value will be discarded
 
 =item get_objects(@id_list)
 
-=item get_objects('ALL')
+=item get_all_objects()
 
 =item get_objects({column=>'col_name',value=>'val'})
 
@@ -841,8 +838,7 @@ B<WARNING>: Passing incorrect id values to C<get_objects()> will cause
 a warning from C<Bio::Genex::UserSequenceFeature::initialize()>. Objects will be
 created for other correct id values in the list.
 
-By passing the 'ALL' parameter, C<get_objects()> returns an instance
-for every entry in the table.
+C<get_all_objects()> returns an instance for every entry in the table.
 
 By passing an anonymous hash reference that contains the 'column' and
 'name' keys, the method will return all objects from the DB whose that
@@ -1040,6 +1036,13 @@ This is the primary key attribute for Bio::Genex::UserSequenceFeature. It has no
 Methods for the spc_fk attribute.
 
 
+=item $value = provider_con_fk();
+
+=item provider_con_fk($value);
+
+Methods for the provider_con_fk attribute.
+
+
 =item $value = usf_name();
 
 =item usf_name($value);
@@ -1066,20 +1069,6 @@ Methods for the other_name attribute.
 =item other_type($value);
 
 Methods for the other_type attribute.
-
-
-=item $value = putative_csf_fk();
-
-=item putative_csf_fk($value);
-
-Methods for the putative_csf_fk attribute.
-
-
-=item $value = nonunique_flag();
-
-=item nonunique_flag($value);
-
-Methods for the nonunique_flag attribute.
 
 
 =item $value = smp_fk();
@@ -1157,8 +1146,9 @@ risk.
 
 These classes are automatically generated by the
 create_genex_classes.pl script.  Each class is a subclass of the
-ObjectTemplate class (written by Sriram Srinivasan, described in
-I<Advanced Perl Programming>, and heavily modified by Jason
+Class::ObjectTemplate::DB class (which is in turn a subclass of
+Class::ObjectTemplate written by Sriram Srinivasan, described in
+I<Advanced Perl Programming>, and modified by Jason
 Stewart). ObjectTemplate implements automatic class creation in perl
 (there exist other options such as C<Class::Struct> and
 C<Class::MethodMaker> by Damian Conway) via an C<attributes()> method
@@ -1170,7 +1160,7 @@ Please send bug reports to genex@ncgr.org
 
 =head1 LAST UPDATED
 
-on Mon Jan 15 11:06:30 2001 by /home/jasons/work/GeneX-WWW-Installer/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-WWW-Installer/Genex --target=UserSequenceFeature --support=HotSpots --support=BlastHits --support=USF_ExternalDBLink
+on Mon Feb  5 21:23:54 2001 by /home/jasons/work/GeneX-Server/Genex/scripts/create_genex_class.pl --dir=/home/jasons/work/GeneX-Server/Genex --target=UserSequenceFeature --support=HotSpots --support=BlastHits --support=USF_ExternalDBLink
 
 =head1 AUTHOR
 

@@ -1,6 +1,5 @@
 %%START_PERL%%
 
-use POSIX 'strftime';
 use Carp;
 use strict;
 
@@ -8,7 +7,7 @@ use strict;
 use CGI qw/:standard :html3 :Carp/; # LS's CGI thingie
 use CGI::Carp qw(fatalsToBrowser);
 use DBI;              # and the DBI module
-use Bio::Genex;
+use Bio::Genex qw(timestamp);
 use Bio::Genex::DBUtils qw(create_select_sql);
 use Bio::Genex::HTMLUtils;
 
@@ -18,8 +17,7 @@ use Bio::Genex::HTMLUtils;
 # instead of being declared explicitly up front
 
 # ============  Executive / Important Decisions  ==========================
-my $timeformat = '%r %A %B %d %Y'; 
-my $current_time = strftime($timeformat, localtime);
+my $current_time = timestamp();
 
 # vars for generating URLs, local temp storage
 my $www_server = '%%WWWHOST%%';
